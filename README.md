@@ -10,6 +10,14 @@ Memori dan journey bersama untuk AI coding tool. Claude Code, Codex, Cursor, dan
 
 Proyek dan branch dideteksi otomatis dari git. Memori dan journey terpisah per branch, dan branch lain tetap bisa dibaca dengan `branch: "*"`.
 
+## Pasang
+
+```sh
+npm install -g 8memory
+```
+
+Butuh Node.js 18 ke atas. Setelah itu cukup ketik `8memory` dari folder mana pun. Binary tersedia untuk Windows x64, Linux x64/arm64, dan macOS x64/arm64.
+
 ## Build
 
 ```sh
@@ -251,6 +259,14 @@ Hook ini hanya mencocokkan teks, jadi perintah yang menyusun path secara tidak l
 Pembacaan default-nya proyek dan branch saat ini. Nilai `*` pada `project` atau `branch` membaca semuanya.
 
 Sintaks query sama di semua backend: kata-kata harus cocok semua, `"frasa persis"`, `awalan*`, dan `OR` di antara alternatif.
+
+## Merilis ke npm
+
+```sh
+node npm/build.js 0.1.0
+```
+
+Setiap folder di `dist/npm` adalah satu paket. Jalankan `npm publish` di folder paket platform dulu, baru di `dist/npm/8memory`.
 
 ## Test
 

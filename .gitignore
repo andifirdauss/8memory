@@ -1,3 +1,4 @@
 *.exe
 /8memory
 /bin/
+/dist/

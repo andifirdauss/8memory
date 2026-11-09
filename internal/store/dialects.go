@@ -76,6 +76,15 @@ var dialects = map[config.Backend]dialect{
 				created_at INTEGER NOT NULL
 			)`,
 			`CREATE INDEX IF NOT EXISTS journey_nodes_created_idx ON journey_nodes (created_at)`,
+			`CREATE TABLE IF NOT EXISTS memory_rules (
+				id TEXT PRIMARY KEY,
+				rule_scope TEXT NOT NULL,
+				project TEXT NOT NULL DEFAULT '',
+				branch TEXT NOT NULL DEFAULT '',
+				rule_text TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			)`,
 		},
 		search: func(b *binder, groups [][]term, filters func() string, limit int) string {
 			query := "SELECT " + selectColumns + " FROM memories_fts f JOIN memories m ON m.id = f.rowid" +
@@ -118,6 +127,15 @@ var dialects = map[config.Backend]dialect{
 				created_at BIGINT NOT NULL
 			)`,
 			`CREATE INDEX IF NOT EXISTS journey_nodes_created_idx ON journey_nodes (created_at)`,
+			`CREATE TABLE IF NOT EXISTS memory_rules (
+				id TEXT PRIMARY KEY,
+				rule_scope TEXT NOT NULL,
+				project TEXT NOT NULL DEFAULT '',
+				branch TEXT NOT NULL DEFAULT '',
+				rule_text TEXT NOT NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL
+			)`,
 		},
 		search: func(b *binder, groups [][]term, filters func() string, limit int) string {
 			query := "SELECT " + selectColumns + " FROM memories m, to_tsquery('simple', " + b.add(tsqueryExpr(groups)) + ") q" +
@@ -155,6 +173,15 @@ var dialects = map[config.Backend]dialect{
 			)`,
 			`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'journey_nodes_created_idx')
 				CREATE INDEX journey_nodes_created_idx ON journey_nodes (created_at)`,
+			`IF OBJECT_ID('memory_rules', 'U') IS NULL CREATE TABLE memory_rules (
+				id NVARCHAR(36) NOT NULL PRIMARY KEY,
+				rule_scope NVARCHAR(16) NOT NULL,
+				project NVARCHAR(400) NOT NULL DEFAULT '',
+				branch NVARCHAR(400) NOT NULL DEFAULT '',
+				rule_text NVARCHAR(2000) NOT NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL
+			)`,
 		},
 		search: likeSearch(strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`, `[`, `\[`), fetchClause),
 	},
@@ -189,6 +216,15 @@ var dialects = map[config.Backend]dialect{
 				created_at NUMBER(19) NOT NULL
 			)`),
 			oracleIfMissing(`CREATE INDEX journey_nodes_created_idx ON journey_nodes (created_at)`),
+			oracleIfMissing(`CREATE TABLE memory_rules (
+				id VARCHAR2(36) PRIMARY KEY,
+				rule_scope VARCHAR2(16) NOT NULL,
+				project VARCHAR2(400 CHAR),
+				branch VARCHAR2(400 CHAR),
+				rule_text VARCHAR2(2000 CHAR) NOT NULL,
+				created_at NUMBER(19) NOT NULL,
+				updated_at NUMBER(19) NOT NULL
+			)`),
 		},
 		// Oracle raises ORA-01424 if the escape character precedes anything
 		// other than % _ or itself, so [ must stay unescaped here.

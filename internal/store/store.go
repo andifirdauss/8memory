@@ -111,6 +111,16 @@ type Store interface {
 	PageNodes(ctx context.Context, afterID string, limit int) ([]Node, error)
 	CountNodes(ctx context.Context) (int, error)
 
+	// AddRule saves a rule, assigning a UUID when ID is empty.
+	AddRule(ctx context.Context, r Rule) (Rule, error)
+	UpdateRule(ctx context.Context, r Rule) (Rule, error)
+	DeleteRule(ctx context.Context, id string) error
+	ListRules(ctx context.Context) ([]Rule, error)
+	// ApplicableRules returns the rules in force for a project and branch.
+	ApplicableRules(ctx context.Context, project, branch string) ([]Rule, error)
+	PageRules(ctx context.Context, afterID string, limit int) ([]Rule, error)
+	CountRules(ctx context.Context) (int, error)
+
 	Close() error
 }
 
@@ -142,9 +152,10 @@ func Open(ctx context.Context, cfg config.Config) (Store, error) {
 type CopyResult struct {
 	Memories int
 	Nodes    int
+	Rules    int
 }
 
-// Copy transfers all journey nodes and memories from src to dst. Node IDs are
+// Copy transfers all rules, journey nodes and memories from src to dst. Node IDs are
 // kept, so memories stay linked to their nodes. Existing rows are skipped,
 // which makes re-running a partial copy safe.
 func Copy(ctx context.Context, src, dst Store) (CopyResult, error) {
@@ -155,6 +166,28 @@ func Copy(ctx context.Context, src, dst Store) (CopyResult, error) {
 	nodesBefore, err := dst.CountNodes(ctx)
 	if err != nil {
 		return CopyResult{}, err
+	}
+
+	rulesBefore, err := dst.CountRules(ctx)
+	if err != nil {
+		return CopyResult{}, err
+	}
+
+	var afterRule string
+	for {
+		page, err := src.PageRules(ctx, afterRule, copyPageSize)
+		if err != nil {
+			return CopyResult{}, fmt.Errorf("read source rules: %w", err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, r := range page {
+			if _, err := dst.AddRule(ctx, r); err != nil {
+				return CopyResult{}, fmt.Errorf("write rule %s: %w", r.ID, err)
+			}
+			afterRule = r.ID
+		}
 	}
 
 	var afterNode string
@@ -199,7 +232,11 @@ func Copy(ctx context.Context, src, dst Store) (CopyResult, error) {
 	if err != nil {
 		return CopyResult{}, err
 	}
-	return CopyResult{Memories: memories - memoriesBefore, Nodes: nodes - nodesBefore}, nil
+	rules, err := dst.CountRules(ctx)
+	if err != nil {
+		return CopyResult{}, err
+	}
+	return CopyResult{Memories: memories - memoriesBefore, Nodes: nodes - nodesBefore, Rules: rules - rulesBefore}, nil
 }
 
 func connect(ctx context.Context, cfg config.Config) (*sql.DB, dialect, error) {

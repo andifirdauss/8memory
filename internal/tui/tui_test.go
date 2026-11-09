@@ -1,10 +1,10 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,20 +13,20 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"8memory/internal/config"
 	"8memory/internal/store"
 )
 
 var (
-	enter = tea.KeyMsg{Type: tea.KeyEnter}
-	down  = tea.KeyMsg{Type: tea.KeyDown}
-	save  = tea.KeyMsg{Type: tea.KeyCtrlS}
-	test  = tea.KeyMsg{Type: tea.KeyCtrlT}
+	enter = tea.KeyPressMsg{Code: tea.KeyEnter}
+	down  = tea.KeyPressMsg{Code: tea.KeyDown}
+	save  = tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	test  = tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
 )
 
-func key(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+func key(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
 // send applies a message and runs any resulting command to completion.
 func send(m *Model, msg tea.Msg) {
@@ -116,16 +116,16 @@ func TestSwitchWithCopy(t *testing.T) {
 	if f.model.screen != screenConfirmCopy || f.model.memories != 3 {
 		t.Fatalf("screen %d, memories %d, status %q", f.model.screen, f.model.memories, f.model.status)
 	}
-	if !strings.Contains(f.model.View(), "Ada 3 memori") {
-		t.Fatal(f.model.View())
+	if !strings.Contains(f.model.render(), "Ada 3 memori") {
+		t.Fatal(f.model.render())
 	}
 	send(f.model, key('y'))
 
 	if f.model.screen != screenDone {
 		t.Fatalf("screen %d, status %q", f.model.screen, f.model.status)
 	}
-	if !strings.Contains(f.model.View(), "3 memori dan 0 node baru disalin") {
-		t.Fatal(f.model.View())
+	if !strings.Contains(f.model.render(), "3 memori, 0 node, dan 0 aturan baru disalin") {
+		t.Fatal(f.model.render())
 	}
 	saved, err := config.Load(f.configPath)
 	if err != nil || saved.Path != f.targetPath {
@@ -224,8 +224,8 @@ func TestFormMasksPassword(t *testing.T) {
 	f := newFixture(t)
 	f.model.current = config.Config{Backend: config.Postgres, Host: "h", Port: 5432, User: "u", Password: "rahasia", Database: "d"}
 	f.model.openForm(backendOptions[1])
-	if strings.Contains(f.model.View(), "rahasia") {
-		t.Fatal(f.model.View())
+	if strings.Contains(f.model.render(), "rahasia") {
+		t.Fatal(f.model.render())
 	}
 }
 
@@ -286,12 +286,12 @@ func TestSwitchToServerBackend(t *testing.T) {
 
 func TestProgramStartsAndQuits(t *testing.T) {
 	f := newFixture(t)
-	var out bytes.Buffer
-	program := tea.NewProgram(New(f.configPath, f.source), tea.WithInput(strings.NewReader("q")), tea.WithOutput(&out))
+	model := New(f.configPath, f.source)
+	if view := model.render(); !strings.Contains(view, "Penyimpanan") || !strings.Contains(view, "ToCLI") {
+		t.Fatal(view)
+	}
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("q")), tea.WithOutput(io.Discard))
 	if _, err := program.Run(); err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "Penyimpanan") {
-		t.Fatalf("output: %q", out.String())
 	}
 }

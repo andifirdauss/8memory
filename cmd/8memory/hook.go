@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"8memory/internal/config"
 	"8memory/internal/gitinfo"
 	"8memory/internal/store"
+	"8memory/internal/tocli"
 )
 
 const hookTimeout = 5 * time.Second
@@ -34,6 +37,12 @@ func runHook(configPath, agent string, stdin io.Reader, stdout io.Writer) error 
 		return nil
 	}
 
+	// ToCLI created the node for a session's first prompt already. The claim
+	// succeeds once, so later prompts in the session still get their own node.
+	if nodeID := os.Getenv(tocli.EnvNode); nodeID != "" && tocli.ClaimPending(filepath.Dir(configPath), nodeID) {
+		return printNodeContext(stdout, nodeID)
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -51,7 +60,11 @@ func runHook(configPath, agent string, stdin io.Reader, stdout io.Writer) error 
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "8memory journey node for this prompt: %s. Pass it as node_id to memory_write; do not call journey_mark.\n", node.ID)
+	return printNodeContext(stdout, node.ID)
+}
+
+func printNodeContext(stdout io.Writer, nodeID string) error {
+	_, err := fmt.Fprintf(stdout, "8memory journey node for this prompt: %s. Pass it as node_id to memory_write; do not call journey_mark.\n", nodeID)
 	return err
 }
 

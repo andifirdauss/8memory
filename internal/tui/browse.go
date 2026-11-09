@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
 	"8memory/internal/refs"
 	"8memory/internal/store"
+	"8memory/internal/tocli"
 )
 
 const (
@@ -109,6 +110,8 @@ type browser struct {
 	loading               bool
 	loadErr               string
 	seq                   int
+	confirmRemove         bool
+	notice                string
 }
 
 type loadedMsg struct {
@@ -234,12 +237,28 @@ func (b *browser) selected() *entry {
 	return nil
 }
 
-func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	b := &m.browser
 	if b.searching {
 		return m.updateSearch(msg)
 	}
+	b.notice = ""
+	if b.confirmRemove {
+		b.confirmRemove = false
+		if msg.String() == "y" {
+			m.removeSelectedAttachments()
+		}
+		return m, nil
+	}
 	switch msg.String() {
+	case "x":
+		if selected := b.selected(); b.kind == listJourney && selected != nil {
+			if tocli.HasSaved(m.attachmentsDir(), selected.node.ID) {
+				b.confirmRemove = true
+			} else {
+				b.notice = "Node ini tidak punya attachment."
+			}
+		}
 	case "up", "k":
 		b.moveCursor(-1)
 	case "down", "j":
@@ -277,7 +296,20 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) removeSelectedAttachments() {
+	b := &m.browser
+	selected := b.selected()
+	if selected == nil {
+		return
+	}
+	if err := tocli.RemoveSaved(m.attachmentsDir(), selected.node.ID); err != nil {
+		b.notice = err.Error()
+		return
+	}
+	b.notice = "Attachment dihapus."
+}
+
+func (m *Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	b := &m.browser
 	switch msg.String() {
 	case "enter":
@@ -309,7 +341,7 @@ func (m *Model) openSelected() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.detailOffset > 0 {
@@ -404,6 +436,13 @@ func (m *Model) viewList(b *strings.Builder) {
 	default:
 		m.viewRows(b)
 	}
+	if state.notice != "" {
+		b.WriteString("\n" + okStyle.Render(state.notice))
+	}
+	if state.confirmRemove {
+		b.WriteString("\n" + errorStyle.Render("Hapus attachment node ini? y ya · tombol lain batal") + "\n")
+		return
+	}
 	b.WriteString("\n" + dimStyle.Render(m.listFooter()) + "\n")
 }
 
@@ -428,6 +467,9 @@ func (m *Model) listFooter() string {
 		return "enter cari · esc batal"
 	}
 	parts := []string{"↑/↓ pilih", "enter buka", "g grup"}
+	if state.kind == listJourney {
+		parts = append(parts, "x hapus attachment")
+	}
 	if state.node == nil {
 		parts = append(parts, "p periode")
 	}

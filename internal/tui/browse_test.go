@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"8memory/internal/store"
 )
@@ -49,7 +49,7 @@ func browseFixture(t *testing.T) *Model {
 
 func expectView(t *testing.T, m *Model, present []string, absent []string) {
 	t.Helper()
-	view := m.View()
+	view := m.render()
 	for _, text := range present {
 		if !strings.Contains(view, text) {
 			t.Errorf("view lacks %q:\n%s", text, view)
@@ -98,13 +98,13 @@ func TestNodeOpensItsMemoriesAndBack(t *testing.T) {
 	}
 	expectView(t, m, []string{"Fitur     Ekspor CSV", "Perubahan tambah", "Branch    main", "Isi lengkap tentang tombol ekspor"}, nil)
 
-	send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.screen != screenList {
 		t.Fatalf("screen %d", m.screen)
 	}
-	send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	expectView(t, m, []string{"Journey", "prompt hari ini"}, []string{"Memori untuk"})
-	send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.screen != screenMenu {
 		t.Fatalf("screen %d", m.screen)
 	}
@@ -162,7 +162,7 @@ func TestLongListScrollsWithinWindow(t *testing.T) {
 	for range 30 {
 		send(m, down)
 	}
-	view := m.View()
+	view := m.render()
 	if lines := strings.Count(view, "\n"); lines > 14 {
 		t.Fatalf("%d lines in a 14 line window:\n%s", lines, view)
 	}
@@ -170,10 +170,10 @@ func TestLongListScrollsWithinWindow(t *testing.T) {
 		t.Fatalf("selection scrolled out of view:\n%s", view)
 	}
 	for range 30 {
-		send(m, tea.KeyMsg{Type: tea.KeyUp})
+		send(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	}
-	if !strings.Contains(m.View(), "p @ main (40)") {
-		t.Fatalf("group header not visible at the top:\n%s", m.View())
+	if !strings.Contains(m.render(), "p @ main (40)") {
+		t.Fatalf("group header not visible at the top:\n%s", m.render())
 	}
 }
 

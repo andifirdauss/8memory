@@ -22,8 +22,10 @@ go build -trimpath -ldflags "-s -w" -o 8memory.exe ./cmd/8memory
 8memory tui
 ```
 
-- **Journey:** linimasa prompt per 1 hari, 7 hari, 1 bulan, atau semua (`p`). Dikelompokkan menurut proyek/branch, proyek, branch, hari, atau agent (`g`). Enter membuka memori milik node itu.
+- **Journey:** linimasa prompt per 1 hari, 7 hari, 1 bulan, atau semua (`p`). Dikelompokkan menurut proyek/branch, proyek, branch, hari, atau agent (`g`). Enter membuka memori milik node itu, dan `x` menghapus attachment node itu.
 - **Memori:** filter periode (`p`), grup (`g`), jenis perubahan (`c`), dan pencarian (`/`). Enter membuka isi lengkap.
+- **Aturan:** lihat, tambah, ubah, dan hapus aturan yang berlaku global, per proyek, atau per branch.
+- **ToCLI:** tulis prompt di sini, lalu teruskan ke CLI asli provider. Lihat [ToCLI](#tocli).
 - **Penyimpanan:** ganti backend dan salin data yang sudah ada. Penyalinan aman diulang. Restart AI client setelah mengganti backend.
 
 | Backend | Pencarian memori |
@@ -85,6 +87,57 @@ Tambahkan ini ke `CLAUDE.md` atau `AGENTS.md`:
 Di awal sesi, panggil journey_list dan memory_search dengan cwd proyek ini.
 Setelah prompt selesai, panggil memory_write sekali per fitur, dengan change add, remove, modify, atau inspect, dan node_id prompt ini. Isi tags dengan sinonim Indonesia dan Inggris.
 ```
+
+## ToCLI
+
+ToCLI memperkaya satu prompt dengan aturan dan memori, lalu membuka CLI asli provider dalam mode interaktif. TUI melepas terminal ke CLI dan kembali saat CLI ditutup.
+
+1. Buka menu **ToCLI**, pilih provider dan folder proyek. Proyek dan branch dideteksi dari folder itu.
+2. Tulis prompt. Tambahkan attachment kalau perlu.
+3. Periksa pratinjau ringkasan, termasuk apa yang terpotong dan peringatan attachment.
+4. Tekan enter. 8memory membuat node journey lalu menjalankan CLI.
+
+Ringkasan dibatasi 2 KB. Aturan didahulukan dan tidak pernah dipendekkan, urutannya branch, proyek, lalu global. Memori mengisi sisa ruang, ditandai sebagai data referensi, dan karakter `<` `>` di dalamnya di-escape supaya teks tersimpan tidak bisa menyamar sebagai instruksi. Hanya teks yang diketik yang dipakai untuk mencari memori dan membuat judul node.
+
+| Provider | Ringkasan | Teks tempelan dan file | Gambar |
+| --- | --- | --- | --- |
+| Claude Code | `--append-system-prompt` | referensi `@path` | path gambar di dalam prompt |
+| Codex | di awal prompt | tidak didukung, muncul peringatan dan tidak dikirim | `--image` |
+
+CLI dicari di `PATH`, lalu di `~/.local/bin` untuk Claude Code. Provider baru ditambahkan dengan mengimplementasikan interface `Provider` di `internal/tocli/provider.go`.
+
+### Tombol editor
+
+| Tombol | Fungsi |
+| --- | --- |
+| Enter | Lanjut ke pratinjau |
+| Shift+Enter, Ctrl+J | Baris baru |
+| Alt+Enter | Baris baru, tetapi Windows Terminal memakainya untuk fullscreen secara default |
+| Alt+V | Tempel gambar dari clipboard |
+| Ctrl+O | Tambah file dari path |
+| Ctrl+E | Daftar attachment: enter untuk pratinjau, `d` untuk hapus |
+| Backspace, Delete | Menghapus penanda attachment sebagai satu kesatuan |
+
+Ctrl+V di Windows Terminal hanya menempel teks, karena terminal tidak mengirim gambar lewat paste. Karena itu gambar memakai Alt+V, yang membaca clipboard lewat PowerShell di Windows, `osascript` di macOS, serta `wl-paste` atau `xclip` di Linux.
+
+### Attachment
+
+Teks tempelan sepanjang 20 baris atau 2 KB ke atas otomatis menjadi attachment, dan di editor hanya tampil penanda seperti `[Paste #1 · 120 baris]`. Ambangnya diatur di `~/.8memory/config.json`:
+
+```json
+{ "paste_lines": 40, "paste_bytes": 4096 }
+```
+
+Attachment disimpan di `~/.8memory/attachments/<uuid node>/`, bukan di folder proyek. Isinya tidak dihitung dalam batas 2 KB dan tidak masuk ke memori. Untuk menghapusnya, tekan `x` pada node di layar Journey, atau hapus folder itu.
+
+### Batasan
+
+- ToCLI hanya memperkuat kepatuhan AI, tidak menjaminnya. Aturan tetap berupa teks yang bisa diabaikan model.
+- Larangan yang wajib tetap perlu `permissions.deny` atau hook. Lihat [Memblokir akses AI ke folder backup](#memblokir-akses-ai-ke-folder-backup).
+- Di mode interaktif, hanya prompt pertama yang lewat ToCLI. Prompt berikutnya diketik langsung di CLI, tanpa ringkasan baru dan tanpa aturan tambahan dari ToCLI.
+- Kalau hook `UserPromptSubmit` aktif, prompt pertama memakai node dari ToCLI dan tidak tercatat dua kali. Prompt berikutnya tetap mendapat node dari hook.
+
+Perilaku editor diadaptasi dari [oh my pi](https://github.com/can1357/oh-my-pi). Kodenya ditulis sendiri untuk proyek ini.
 
 ## File besar
 
@@ -170,6 +223,8 @@ Sintaks query sama di semua backend: kata-kata harus cocok semua, `"frasa persis
 ```sh
 go test ./...
 ```
+
+Test `MEMORY8_TEST_CLIPBOARD=1` membaca clipboard sungguhan dan dilewati secara default.
 
 Backend server ikut diuji kalau env var berikut berisi JSON konfigurasi: `MEMORY8_TEST_POSTGRES`, `MEMORY8_TEST_SQLSERVER`, `MEMORY8_TEST_ORACLE`. Contoh:
 

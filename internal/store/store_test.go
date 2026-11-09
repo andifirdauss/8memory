@@ -303,6 +303,101 @@ func runConformance(t *testing.T, cfg config.Config) {
 			t.Fatalf("%+v, %v", copied, err)
 		}
 	})
+	t.Run("rules", func(t *testing.T) {
+		rulesProject := project + "-rules"
+		add := func(scope, proj, branch, text string) Rule {
+			t.Helper()
+			r, err := s.AddRule(ctx, Rule{Scope: scope, Project: proj, Branch: branch, Text: text})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+		global := add(ScopeGlobal, "diabaikan", "diabaikan", "aturan global "+project)
+		if global.Project != "" || global.Branch != "" {
+			t.Fatalf("%+v", global)
+		}
+		add(ScopeProject, rulesProject, "diabaikan", "aturan proyek")
+		onMain := add(ScopeBranch, rulesProject, "main", "aturan branch main 认证")
+		add(ScopeBranch, rulesProject, "fitur", "aturan branch fitur")
+		add(ScopeProject, rulesProject+"-lain", "", "aturan proyek lain")
+
+		texts := func(project, branch string) string {
+			t.Helper()
+			rules, err := s.ApplicableRules(ctx, project, branch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, r := range rules {
+				if r.Scope != ScopeGlobal || r.Text == global.Text {
+					out = append(out, r.Text)
+				}
+			}
+			return strings.Join(out, "|")
+		}
+		if got := texts(rulesProject, "main"); got != "aturan branch main 认证|aturan proyek|"+global.Text {
+			t.Fatal(got)
+		}
+		if got := texts(rulesProject, ""); got != "aturan proyek|"+global.Text {
+			t.Fatal(got)
+		}
+		if got := texts("", ""); got != global.Text {
+			t.Fatal(got)
+		}
+
+		onMain.Text, onMain.Scope, onMain.Project, onMain.Branch = "aturan diubah", ScopeProject, rulesProject, ""
+		updated, err := s.UpdateRule(ctx, onMain)
+		if err != nil || updated.Text != "aturan diubah" || updated.Scope != ScopeProject || updated.Branch != "" {
+			t.Fatalf("%+v, %v", updated, err)
+		}
+		if err := s.DeleteRule(ctx, updated.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteRule(ctx, updated.ID); err == nil {
+			t.Fatal("deleted a rule that no longer exists")
+		}
+		if _, err := s.UpdateRule(ctx, updated); err == nil {
+			t.Fatal("updated a rule that no longer exists")
+		}
+		for _, bad := range []Rule{
+			{Scope: "semua", Text: "x"},
+			{Scope: ScopeProject, Text: "x"},
+			{Scope: ScopeBranch, Project: "p", Text: "x"},
+			{Scope: ScopeGlobal, Text: "  "},
+			{Scope: ScopeGlobal, Text: strings.Repeat("x", maxRuleRunes+1)},
+		} {
+			if _, err := s.AddRule(ctx, bad); err == nil {
+				t.Errorf("accepted %+v", bad)
+			}
+		}
+		if listed, err := s.ListRules(ctx); err != nil || len(listed) == 0 {
+			t.Fatalf("%+v, %v", listed, err)
+		}
+
+		src, err := Open(ctx, sqliteConfig(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer src.Close()
+		original, err := src.AddRule(ctx, Rule{Scope: ScopeBranch, Project: project + "-copied", Branch: "main", Text: "disalin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := Copy(ctx, src, s); err != nil || n.Rules != 1 {
+			t.Fatalf("copy: %+v, %v", n, err)
+		}
+		if n, err := Copy(ctx, src, s); err != nil || n.Rules != 0 {
+			t.Fatalf("second copy: %+v, %v", n, err)
+		}
+		copied, err := s.ApplicableRules(ctx, project+"-copied", "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if copied[0].ID != original.ID || copied[0].Text != "disalin" {
+			t.Fatalf("%+v", copied[0])
+		}
+	})
 	t.Run("since filter", func(t *testing.T) {
 		old, err := s.Write(ctx, Memory{Project: project + "-since", Content: "catatan lawas", CreatedAt: time.Now().Add(-48 * time.Hour)})
 		if err != nil {

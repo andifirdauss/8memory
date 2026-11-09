@@ -41,6 +41,10 @@ type Config struct {
 	// Aliases maps a ref scheme to a directory on this machine, for example
 	// backup -> D:\\Backup. Each machine keeps its own mapping.
 	Aliases map[string]string `json:"aliases,omitempty"`
+	// PasteLines and PasteBytes set when a paste in ToCLI becomes an
+	// attachment. Zero uses the defaults.
+	PasteLines int `json:"paste_lines,omitempty"`
+	PasteBytes int `json:"paste_bytes,omitempty"`
 }
 
 // DefaultPath returns ~/.8memory/config.json.
@@ -119,6 +123,9 @@ func Save(path string, c Config) error {
 
 // Validate reports the first missing or malformed field.
 func (c Config) Validate() error {
+	if c.PasteLines < 0 || c.PasteBytes < 0 {
+		return errors.New("paste_lines and paste_bytes must not be negative")
+	}
 	for name, dir := range c.Aliases {
 		if err := refs.ValidateAlias(name); err != nil {
 			return err

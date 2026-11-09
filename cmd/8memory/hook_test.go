@@ -12,6 +12,7 @@ import (
 
 	"8memory/internal/config"
 	"8memory/internal/store"
+	"8memory/internal/tocli"
 )
 
 func hookNodes(t *testing.T, configPath string) []store.Node {
@@ -92,5 +93,32 @@ func TestHookCommandNeverBlocksPrompt(t *testing.T) {
 	cmd.Stdin = strings.NewReader("ini bukan json")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("hook must exit 0 on bad input: %v", err)
+	}
+}
+
+func TestHookDoesNotDuplicateToCLINode(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	const nodeID = "0195f3a2-7c10-7000-8000-000000000042"
+	if err := tocli.MarkPending(filepath.Dir(configPath), nodeID); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(tocli.EnvNode, nodeID)
+	dir := t.TempDir()
+
+	var first bytes.Buffer
+	if err := runHook(configPath, "claude", hookPayload(t, "prompt pertama", dir), &first); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first.String(), nodeID) || len(hookNodes(t, configPath)) != 0 {
+		t.Fatalf("first prompt must reuse the ToCLI node: %q", first.String())
+	}
+
+	var second bytes.Buffer
+	if err := runHook(configPath, "claude", hookPayload(t, "prompt kedua", dir), &second); err != nil {
+		t.Fatal(err)
+	}
+	nodes := hookNodes(t, configPath)
+	if len(nodes) != 1 || nodes[0].Title != "prompt kedua" || strings.Contains(second.String(), nodeID) {
+		t.Fatalf("later prompts need their own node: %+v %q", nodes, second.String())
 	}
 }

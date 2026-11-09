@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"8memory/internal/config"
 	"8memory/internal/store"
@@ -41,6 +41,13 @@ const (
 	screenBusy
 	screenConfirmCopy
 	screenDone
+	screenRules
+	screenRuleForm
+	screenToCLIForm
+	screenEditor
+	screenAttachments
+	screenAttachPreview
+	screenCLIPreview
 )
 
 type backendOption struct {
@@ -76,6 +83,7 @@ type (
 	preparedMsg struct {
 		memories  int
 		nodes     int
+		rules     int
 		sourceErr error
 		err       error
 	}
@@ -112,6 +120,11 @@ type Model struct {
 	memories     int
 	nodes        int
 	warning      string
+	ruleCount    int
+	notice       string
+	noticeErr    bool
+	rules        rulesState
+	tocli        tocliState
 }
 
 // New creates the TUI model for the given config.
@@ -132,7 +145,11 @@ func Run(configPath string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(New(configPath, current), tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(New(configPath, current)).Run()
+	// The editor may be open when the program ends.
+	if runtime.GOOS == "windows" {
+		os.Stdout.WriteString(win32InputOff)
+	}
 	return err
 }
 
@@ -144,7 +161,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case loadedMsg:
 		return m.handleLoaded(msg)
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		return m.handlePaste(msg)
+	case rulesLoadedMsg:
+		return m.handleRulesLoaded(msg)
+	case ruleChangedMsg:
+		return m.handleRuleChanged(msg)
+	case tocliReadyMsg:
+		return m.handleToCLIReady(msg)
+	case tocliImageMsg:
+		return m.handleImage(msg)
+	case tocliPlanMsg:
+		return m.handlePlan(msg)
+	case tocliLaunchMsg:
+		return m.handleLaunch(msg)
+	case tocliDoneMsg:
+		return m.handleDone(msg)
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			m.cancel()
 			return m, tea.Quit
@@ -156,6 +189,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case screenDetail:
 			return m.updateDetail(msg)
+		case screenRules:
+			return m.updateRules(msg)
+		case screenRuleForm:
+			return m.updateRuleForm(msg)
+		case screenToCLIForm:
+			return m.updateToCLIForm(msg)
+		case screenEditor:
+			return m.updateEditor(msg)
+		case screenAttachments:
+			return m.updateAttachments(msg)
+		case screenAttachPreview:
+			return m.updateAttachPreview(msg)
+		case screenCLIPreview:
+			return m.updateCLIPreview(msg)
 		case screenPick:
 			return m.updatePick(msg)
 		case screenForm:
@@ -182,14 +229,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.current = m.draft
 		m.screen = screenDone
-		m.setStatus(fmt.Sprintf("%d memori dan %d node baru disalin.", msg.copied.Memories, msg.copied.Nodes), false)
+		m.setStatus(fmt.Sprintf("%d memori, %d node, dan %d aturan baru disalin.", msg.copied.Memories, msg.copied.Nodes, msg.copied.Rules), false)
 	}
 	return m, nil
 }
 
-var menuItems = []string{"Journey", "Memori", "Penyimpanan"}
+var menuItems = []string{"Journey", "Memori", "Aturan", "ToCLI", "Penyimpanan"}
 
-func (m *Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+const (
+	menuJourney = iota
+	menuMemory
+	menuRules
+	menuToCLI
+	menuStorage
+)
+
+func (m *Model) updateMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.menu > 0 {
@@ -200,13 +255,19 @@ func (m *Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.menu++
 		}
 	case "enter":
+		m.notice = ""
 		switch m.menu {
-		case 0:
+		case menuJourney:
 			return m.openList(listJourney)
-		case 1:
+		case menuMemory:
 			return m.openList(listMemory)
+		case menuRules:
+			return m.openRules()
+		case menuToCLI:
+			return m.openToCLI()
+		case menuStorage:
+			m.screen = screenPick
 		}
-		m.screen = screenPick
 	case "q", "esc":
 		m.cancel()
 		return m, tea.Quit
@@ -214,7 +275,7 @@ func (m *Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) updatePick(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updatePick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
@@ -271,11 +332,12 @@ func (m *Model) openForm(option backendOption) {
 func newInput(value, placeholder string) textinput.Model {
 	input := textinput.New()
 	input.Prompt = ""
-	input.Width = 48
+	input.SetWidth(48)
 	input.SetValue(value)
 	input.Placeholder = placeholder
-	// A static cursor keeps Focus from scheduling blink timers.
-	input.Cursor.SetMode(cursor.CursorStatic)
+	styles := input.Styles()
+	styles.Cursor.Blink = false // a blink timer would redraw the screen forever
+	input.SetStyles(styles)
 	return input
 }
 
@@ -291,7 +353,7 @@ func optionsHint(backend config.Backend) string {
 	return ""
 }
 
-func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.screen = screenPick
@@ -328,7 +390,7 @@ func (m *Model) moveFocus(delta int) {
 func (m *Model) readForm() (config.Config, error) {
 	value := func(i int) string { return strings.TrimSpace(m.inputs[i].Value()) }
 	// Aliases are per-machine settings, unrelated to the storage being chosen.
-	cfg := config.Config{Backend: m.option.backend, Aliases: m.current.Aliases}
+	cfg := config.Config{Backend: m.option.backend, Aliases: m.current.Aliases, PasteLines: m.current.PasteLines, PasteBytes: m.current.PasteBytes}
 
 	if m.option.backend == config.SQLite {
 		path, err := absolutePath(value(0))
@@ -423,7 +485,11 @@ func prepare(ctx context.Context, current, target config.Config) preparedMsg {
 	if err != nil {
 		return preparedMsg{sourceErr: err}
 	}
-	return preparedMsg{memories: memories, nodes: nodes}
+	rules, err := src.CountRules(ctx)
+	if err != nil {
+		return preparedMsg{sourceErr: err}
+	}
+	return preparedMsg{memories: memories, nodes: nodes, rules: rules}
 }
 
 func (m *Model) handlePrepared(msg preparedMsg) (tea.Model, tea.Cmd) {
@@ -436,14 +502,14 @@ func (m *Model) handlePrepared(msg preparedMsg) (tea.Model, tea.Cmd) {
 	if msg.sourceErr != nil {
 		m.warning = "Backend lama tidak bisa dibaca, jadi tidak ada memori yang disalin: " + msg.sourceErr.Error()
 	}
-	if msg.memories+msg.nodes > 0 {
-		m.memories, m.nodes, m.screen = msg.memories, msg.nodes, screenConfirmCopy
+	if msg.memories+msg.nodes+msg.rules > 0 {
+		m.memories, m.nodes, m.ruleCount, m.screen = msg.memories, msg.nodes, msg.rules, screenConfirmCopy
 		return m, nil
 	}
 	return m.finish(false)
 }
 
-func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		return m.finish(true)
@@ -460,7 +526,7 @@ func (m *Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) finish(copyData bool) (tea.Model, tea.Cmd) {
 	m.screen, m.busyLabel = screenBusy, "Menyimpan..."
 	if copyData {
-		m.busyLabel = fmt.Sprintf("Menyalin %d memori dan %d node...", m.memories, m.nodes)
+		m.busyLabel = fmt.Sprintf("Menyalin %d memori, %d node, dan %d aturan...", m.memories, m.nodes, m.ruleCount)
 	}
 	ctx, source, target, path := m.ctx, m.current, m.draft, m.configPath
 	return m, func() tea.Msg {
@@ -489,7 +555,14 @@ func copyAll(ctx context.Context, source, target config.Config) (store.CopyResul
 	return store.Copy(ctx, src, dst)
 }
 
-func (m *Model) View() string {
+// View implements tea.Model.
+func (m *Model) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+func (m *Model) render() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("8memory") + "\n")
 	b.WriteString(dimStyle.Render("Aktif: "+m.current.Describe()) + "\n\n")
@@ -501,6 +574,20 @@ func (m *Model) View() string {
 		m.viewList(&b)
 	case screenDetail:
 		m.viewDetail(&b)
+	case screenRules:
+		m.viewRules(&b)
+	case screenRuleForm:
+		m.viewRuleForm(&b)
+	case screenToCLIForm:
+		m.viewToCLIForm(&b)
+	case screenEditor:
+		m.viewEditor(&b)
+	case screenAttachments:
+		m.viewAttachments(&b)
+	case screenAttachPreview:
+		m.viewAttachPreview(&b)
+	case screenCLIPreview:
+		m.viewCLIPreview(&b)
 	case screenPick:
 		m.viewPick(&b)
 	case screenForm:
@@ -508,7 +595,7 @@ func (m *Model) View() string {
 	case screenBusy:
 		b.WriteString(m.busyLabel + "\n")
 	case screenConfirmCopy:
-		fmt.Fprintf(&b, "Ada %d memori dan %d node journey di backend aktif.\nSalin ke %s?\n\n", m.memories, m.nodes, m.draft.Describe())
+		fmt.Fprintf(&b, "Ada %d memori, %d node journey, dan %d aturan di backend aktif.\nSalin ke %s?\n\n", m.memories, m.nodes, m.ruleCount, m.draft.Describe())
 		b.WriteString(dimStyle.Render("y salin · n pindah tanpa menyalin · esc kembali") + "\n")
 	case screenDone:
 		b.WriteString(okStyle.Render("Tersimpan.") + " " + m.status + "\n")
@@ -528,6 +615,13 @@ func (m *Model) viewMenu(b *strings.Builder) {
 			marker = "> "
 		}
 		b.WriteString(marker + item + "\n")
+	}
+	if m.notice != "" {
+		style := okStyle
+		if m.noticeErr {
+			style = errorStyle
+		}
+		b.WriteString("\n" + style.Width(m.viewWidth()-2).Render(m.notice) + "\n")
 	}
 	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter buka · q keluar") + "\n")
 }

@@ -23,8 +23,9 @@ import (
 const usage = `8memory - shared memory and journey for AI coding tools
 
 Usage:
+  8memory                                       Open the TUI
   8memory serve [--config path]                 Run the MCP server on stdio
-  8memory tui   [--config path]                 Browse data and choose the storage backend
+  8memory tui   [--config path]                 Open the TUI with options
   8memory hook  [--config path] [--agent name]  Create a journey node from a prompt-submit hook
   8memory resolve [--config path] <ref>         Print where a file reference is on this machine
 `
@@ -38,7 +39,10 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 0 || !slices.Contains([]string{"serve", "tui", "hook", "resolve"}, args[0]) {
+	if len(args) == 0 {
+		args = []string{"tui"}
+	}
+	if !slices.Contains([]string{"serve", "tui", "hook", "resolve"}, args[0]) {
 		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("expected a command: serve, tui, hook or resolve")
 	}

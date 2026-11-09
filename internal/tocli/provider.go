@@ -1,8 +1,10 @@
-// Package tocli hands a prompt, its briefing and its attachments to the real
-// CLI of an AI provider.
+// Package tocli sends each prompt typed in the TUI, with its briefing and
+// attachments, to the real CLI of an AI provider and reads the reply back.
 package tocli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,18 +15,48 @@ import (
 )
 
 // EnvNode tells a prompt-submit hook that ToCLI already created the node for
-// the session's first prompt.
+// the prompt being run.
 const EnvNode = "MEMORY8_TOCLI_NODE"
 
 // maxCommandLine stays under the 32,767 character limit of Windows.
 const maxCommandLine = 30000
 
-// Request is everything a provider needs to start a session.
+// Request is everything a provider needs to run one prompt.
 type Request struct {
-	Context     string
+	Full        string // the whole briefing
+	System      string // the part that stays the same between prompts
+	Turn        string // the part specific to this prompt
 	Prompt      string // typed text, still containing attachment markers
 	Attachments []Attachment
 	AttachDir   string
+	Session     string     // the conversation to continue, empty for a new one
+	Memory      *MCPServer // connects 8memory's own tools to the CLI
+	Approval    *MCPServer // the permission host, if there is one
+}
+
+// MCPServer describes one server a CLI should connect to for a prompt.
+type MCPServer struct {
+	Type    string            `json:"type"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+const (
+	memoryServerName = "8memory"
+	// memoryTools run without asking, so remembering never interrupts the user.
+	// journey_mark is left out because ToCLI already created the node.
+	memoryTools = "mcp__8memory__memory_search,mcp__8memory__memory_write,mcp__8memory__journey_list"
+)
+
+// marshal returns value as JSON. Only strings, slices and maps are passed.
+func marshal(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }
 
 // Provider adapts one AI CLI. To add a provider, implement this interface and
@@ -39,7 +71,12 @@ type Provider interface {
 	Supports(a Attachment) bool
 	// Note warns about a supported attachment that may still not arrive in full.
 	Note(a Attachment) string
+	// AsksApproval reports whether the CLI can ask the TUI about a tool call.
+	AsksApproval() bool
 	Args(r Request) []string
+	NewParser() Parser
+	// UsageArgs returns the command that reports usage limits, nil if there is none.
+	UsageArgs() []string
 }
 
 // Providers lists the CLIs offered in the TUI.
@@ -123,8 +160,9 @@ func Warnings(p Provider, attachments []Attachment) []string {
 	return out
 }
 
-// Build creates the command for a session in dir.
-func Build(p Provider, exe Executable, dir, nodeID string, r Request) (*exec.Cmd, error) {
+// Build creates the command that runs one prompt in dir. Cancelling ctx stops
+// the CLI and whatever it started.
+func Build(ctx context.Context, p Provider, exe Executable, dir, nodeID string, r Request) (*exec.Cmd, error) {
 	args := append(append([]string{}, exe.Prefix...), p.Args(r)...)
 	total := len(exe.Path)
 	for _, arg := range args {
@@ -133,10 +171,20 @@ func Build(p Provider, exe Executable, dir, nodeID string, r Request) (*exec.Cmd
 	if total > maxCommandLine {
 		return nil, fmt.Errorf("prompt terlalu panjang untuk baris perintah (%d karakter). Tempel teks panjang sebagai attachment", total)
 	}
-	cmd := exec.Command(exe.Path, args...)
+	cmd := exec.CommandContext(ctx, exe.Path, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), EnvNode+"="+nodeID)
+	prepareProcess(cmd)
 	return cmd, nil
+}
+
+// BuildUsage creates the command that reports the provider's usage limits.
+func BuildUsage(ctx context.Context, p Provider, exe Executable, dir string) *exec.Cmd {
+	args := append(append([]string{}, exe.Prefix...), p.UsageArgs()...)
+	cmd := exec.CommandContext(ctx, exe.Path, args...)
+	cmd.Dir = dir
+	prepareProcess(cmd)
+	return cmd
 }
 
 // expandMarkers replaces each attachment marker using reference and removes
@@ -178,8 +226,23 @@ func (claudeCode) Note(a Attachment) string {
 	return ""
 }
 
+func (claudeCode) AsksApproval() bool { return true }
+
+func (claudeCode) NewParser() Parser { return &claudeParser{} }
+
+// UsageArgs runs /usage, which Claude Code answers locally without a model
+// turn. Persistence is off because it is not part of any conversation.
+func (claudeCode) UsageArgs() []string {
+	return []string{"-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--", "/usage"}
+}
+
 // Args uses @path for text and a plain path for images, the two forms Claude
-// Code documents. "--" keeps the prompt from being read as a --add-dir value.
+// Code documents. "--" keeps the prompt from being read as a value of the
+// flags that take several.
+//
+// Only rules go in the system prompt. A system prompt that changed on every
+// prompt would invalidate the cache of the whole conversation, so what varies
+// goes at the start of the message instead.
 func (c claudeCode) Args(r Request) []string {
 	prompt := expandMarkers(c, r, func(a Attachment) string {
 		quoted := a.SavedPath
@@ -191,7 +254,29 @@ func (c claudeCode) Args(r Request) []string {
 		}
 		return "@" + quoted
 	})
-	args := []string{"--append-system-prompt", r.Context}
+	// Claude Code only recognizes a slash command at the very start.
+	if r.Turn != "" && !strings.HasPrefix(prompt, "/") {
+		prompt = r.Turn + "\n\n" + prompt
+	}
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"}
+	if r.Session != "" {
+		args = append(args, "--resume", r.Session)
+	}
+	servers := map[string]*MCPServer{}
+	if r.Memory != nil {
+		servers[memoryServerName] = r.Memory
+		args = append(args, "--allowedTools", memoryTools)
+	}
+	if r.Approval != nil {
+		servers[approvalServerName] = r.Approval
+		args = append(args, "--permission-prompt-tool", approvalToolRef)
+	}
+	if len(servers) > 0 {
+		args = append(args, "--mcp-config", marshal(map[string]any{"mcpServers": servers}))
+	}
+	if r.System != "" {
+		args = append(args, "--append-system-prompt", r.System)
+	}
 	if len(r.Attachments) > 0 {
 		args = append(args, "--add-dir", r.AttachDir)
 	}
@@ -212,19 +297,43 @@ func (codex) Supports(a Attachment) bool { return a.Kind == KindImage }
 
 func (codex) Note(Attachment) string { return "" }
 
-// Args puts the prompt first, because --image takes one or more values and
-// would otherwise treat the prompt as another image path.
+// codex exec cannot ask anyone about a command; the sandbox is its limit.
+func (codex) AsksApproval() bool { return false }
+
+func (codex) NewParser() Parser { return &codexParser{} }
+
+func (codex) UsageArgs() []string { return nil }
+
+// Args sets the sandbox through -c because "exec resume" has no --sandbox
+// flag. "--" ends --image, which takes several values and would otherwise
+// swallow the prompt.
 func (c codex) Args(r Request) []string {
 	number := 0
 	prompt := expandMarkers(c, r, func(Attachment) string {
 		number++
 		return fmt.Sprintf("[image %d]", number)
 	})
-	args := []string{r.Context + "\n\n" + prompt}
+	args := []string{"exec"}
+	if r.Session != "" {
+		args = append(args, "resume")
+	}
+	args = append(args, "--json", "--skip-git-repo-check", "-c", `sandbox_mode="workspace-write"`)
+	if r.Memory != nil {
+		// A JSON string or list of strings is also valid TOML.
+		args = append(args,
+			"-c", "mcp_servers."+memoryServerName+".command="+marshal(r.Memory.Command),
+			"-c", "mcp_servers."+memoryServerName+".args="+marshal(r.Memory.Args),
+			"-c", "mcp_servers."+memoryServerName+`.default_tools_approval_mode="approve"`,
+		)
+	}
 	for _, a := range r.Attachments {
 		if c.Supports(a) {
 			args = append(args, "--image", a.SavedPath)
 		}
 	}
-	return args
+	args = append(args, "--")
+	if r.Session != "" {
+		args = append(args, r.Session)
+	}
+	return append(args, r.Full+"\n\n"+prompt)
 }

@@ -19,14 +19,16 @@ go build -trimpath -ldflags "-s -w" -o 8memory.exe ./cmd/8memory
 ## TUI
 
 ```sh
-8memory tui
+8memory
 ```
 
+Di PowerShell, dari folder program, ketik `.\8memory`. Supaya bisa dipanggil dari mana saja, tambahkan foldernya ke `PATH`.
+
 - **Journey:** linimasa prompt per 1 hari, 7 hari, 1 bulan, atau semua (`p`). Dikelompokkan menurut proyek/branch, proyek, branch, hari, atau agent (`g`). Enter membuka memori milik node itu, dan `x` menghapus attachment node itu.
-- **Memori:** filter periode (`p`), grup (`g`), jenis perubahan (`c`), dan pencarian (`/`). Enter membuka isi lengkap.
-- **Aturan:** lihat, tambah, ubah, dan hapus aturan yang berlaku global, per proyek, atau per branch.
-- **ToCLI:** tulis prompt di sini, lalu teruskan ke CLI asli provider. Lihat [ToCLI](#tocli).
-- **Penyimpanan:** ganti backend dan salin data yang sudah ada. Penyalinan aman diulang. Restart AI client setelah mengganti backend.
+- **Memory:** filter periode (`p`), grup (`g`), jenis perubahan (`c`), dan pencarian (`/`). Enter membuka isi lengkap.
+- **Rules:** lihat, tambah, ubah, dan hapus aturan yang berlaku global, per proyek, atau per branch.
+- **Chat:** bicara dengan AI dari sini, dengan CLI asli provider bekerja di belakang layar. Lihat [Chat](#chat).
+- **Storage:** ganti backend dan salin data yang sudah ada. Penyalinan aman diulang. Restart AI client setelah mengganti backend.
 
 | Backend | Pencarian memori |
 | --- | --- |
@@ -88,35 +90,63 @@ Di awal sesi, panggil journey_list dan memory_search dengan cwd proyek ini.
 Setelah prompt selesai, panggil memory_write sekali per fitur, dengan change add, remove, modify, atau inspect, dan node_id prompt ini. Isi tags dengan sinonim Indonesia dan Inggris.
 ```
 
-## ToCLI
+## Chat
 
-ToCLI memperkaya satu prompt dengan aturan dan memori, lalu membuka CLI asli provider dalam mode interaktif. TUI melepas terminal ke CLI dan kembali saat CLI ditutup.
+Chat adalah layar percakapan di dalam TUI. Setiap prompt diketik di 8memory, diperkaya dengan aturan dan memori, lalu dijalankan oleh CLI asli provider di belakang layar. Jawabannya tampil di TUI, dan percakapannya berlanjut dari prompt ke prompt.
 
-1. Buka menu **ToCLI**, pilih provider dan folder proyek. Proyek dan branch dideteksi dari folder itu.
+1. Buka menu **Chat**. Tekan enter di baris Provider untuk memilih dari daftar, lalu isi folder proyek. Proyek dan branch dideteksi dari folder itu.
 2. Tulis prompt. Tambahkan attachment kalau perlu.
-3. Periksa pratinjau ringkasan, termasuk apa yang terpotong dan peringatan attachment.
-4. Tekan enter. 8memory membuat node journey lalu menjalankan CLI.
+3. Tekan enter. Prompt langsung terkirim. Layar konfirmasi hanya muncul kalau ada attachment yang tidak bisa dikirim.
+4. Setiap prompt otomatis mendapat node journey sendiri dan ringkasan. Kalau ada aturan yang terpotong dari batas 2 KB, TUI memberi tahu.
 
-Ringkasan dibatasi 2 KB. Aturan didahulukan dan tidak pernah dipendekkan, urutannya branch, proyek, lalu global. Memori mengisi sisa ruang, ditandai sebagai data referensi, dan karakter `<` `>` di dalamnya di-escape supaya teks tersimpan tidak bisa menyamar sebagai instruksi. Hanya teks yang diketik yang dipakai untuk mencari memori dan membuat judul node.
+Ringkasan dibatasi 2 KB dan berisi aturan yang berlaku serta catatan bahwa proyek ini punya memori 8memory. Aturan tidak pernah dipendekkan, urutannya branch, proyek, lalu global.
 
-| Provider | Ringkasan | Teks tempelan dan file | Gambar |
-| --- | --- | --- | --- |
-| Claude Code | `--append-system-prompt` | referensi `@path` | path gambar di dalam prompt |
-| Codex | di awal prompt | tidak didukung, muncul peringatan dan tidak dikirim | `--image` |
+Isi memori tidak disalin ke ringkasan. AI sendiri yang mencarinya dengan `memory_search` saat perlu dan menulis hasil kerjanya dengan `memory_write`. Chat menyambungkan tool 8memory ke CLI secara otomatis di setiap prompt, jadi `claude mcp add` tidak diperlukan untuk Chat, dan tool itu berjalan tanpa dialog izin. Ringkasan meminta AI memperlakukan hasil pencarian sebagai data, bukan instruksi. Judul node diambil dari teks yang diketik.
+
+| Provider | Dijalankan dengan | Ringkasan | Teks tempelan dan file | Gambar |
+| --- | --- | --- | --- | --- |
+| Claude Code | `claude -p --resume` | catatan dan aturan di `--append-system-prompt`, ID node di awal prompt | referensi `@path` | path gambar di dalam prompt |
+| Codex | `codex exec resume --json` | di awal prompt | tidak didukung, muncul peringatan dan tidak dikirim | `--image` |
+
+Di Claude Code, ID node ditaruh di awal pesan, bukan di system prompt. System prompt yang berubah di setiap prompt akan membatalkan cache seluruh percakapan dan memboroskan kuota.
+
+### Izin tool
+
+Claude Code berjalan dalam auto mode. Tindakan yang masih butuh izin muncul sebagai dialog di TUI, dengan seluruh isi tool call. **Ctrl+Y** mengizinkan dan **Esc** menolak. Mengizinkan sengaja tidak memakai `y`, karena dialog bisa terbuka saat kamu sedang mengetik prompt berikutnya. Dialog ini dilayani server MCP yang hanya mendengarkan `127.0.0.1` selama sesi, dengan token acak.
+
+`permissions.deny`, `ask`, dan hook di setting Claude Code tetap berlaku.
+
+Codex tidak punya dialog izin dalam mode ini. Codex berjalan di sandbox `workspace-write`, jadi hanya bisa menulis di folder proyek.
 
 CLI dicari di `PATH`, lalu di `~/.local/bin` untuk Claude Code. Provider baru ditambahkan dengan mengimplementasikan interface `Provider` di `internal/tocli/provider.go`.
+
+### Perintah
+
+Ketik `/` di awal prompt untuk membuka menu. ↑/↓ memilih, Tab melengkapi, Enter menjalankan, dan Esc menutup menu.
+
+| Perintah | Fungsi |
+| --- | --- |
+| `/help` | Daftar perintah dan tombol |
+| `/new`, `/clear` | Membersihkan layar dan memulai percakapan baru di folder yang sama. Percakapan lama tetap tersimpan di CLI provider |
+| `/usage` | Sisa kuota provider, tanpa memakai kuota. Codex tidak menyediakannya di mode ini |
+| `/exit` | Mengakhiri sesi |
+
+Teks lain yang diawali `/` diteruskan ke CLI provider sebagai prompt biasa, termasuk node journey dan ringkasannya.
 
 ### Tombol editor
 
 | Tombol | Fungsi |
 | --- | --- |
-| Enter | Lanjut ke pratinjau |
+| Enter | Kirim prompt |
 | Shift+Enter, Ctrl+J | Baris baru |
 | Alt+Enter | Baris baru, tetapi Windows Terminal memakainya untuk fullscreen secara default |
 | Alt+V | Tempel gambar dari clipboard |
 | Ctrl+O | Tambah file dari path |
 | Ctrl+E | Daftar attachment: enter untuk pratinjau, `d` untuk hapus |
 | Backspace, Delete | Menghapus penanda attachment sebagai satu kesatuan |
+| PgUp, PgDn | Menggulir percakapan |
+| Esc, Ctrl+C | Menghentikan prompt yang sedang berjalan |
+| Esc dua kali | Mengakhiri sesi saat tidak ada prompt berjalan |
 
 Ctrl+V di Windows Terminal hanya menempel teks, karena terminal tidak mengirim gambar lewat paste. Karena itu gambar memakai Alt+V, yang membaca clipboard lewat PowerShell di Windows, `osascript` di macOS, serta `wl-paste` atau `xclip` di Linux.
 
@@ -132,10 +162,14 @@ Attachment disimpan di `~/.8memory/attachments/<uuid node>/`, bukan di folder pr
 
 ### Batasan
 
-- ToCLI hanya memperkuat kepatuhan AI, tidak menjaminnya. Aturan tetap berupa teks yang bisa diabaikan model.
+- Chat hanya memperkuat kepatuhan AI, tidak menjaminnya. Aturan tetap berupa teks yang bisa diabaikan model.
 - Larangan yang wajib tetap perlu `permissions.deny` atau hook. Lihat [Memblokir akses AI ke folder backup](#memblokir-akses-ai-ke-folder-backup).
-- Di mode interaktif, hanya prompt pertama yang lewat ToCLI. Prompt berikutnya diketik langsung di CLI, tanpa ringkasan baru dan tanpa aturan tambahan dari ToCLI.
-- Kalau hook `UserPromptSubmit` aktif, prompt pertama memakai node dari ToCLI dan tidak tercatat dua kali. Prompt berikutnya tetap mendapat node dari hook.
+- Hanya prompt yang diketik di layar Chat yang mendapat ringkasan. Prompt yang diketik langsung di CLI provider tidak lewat Chat.
+- Tampilan jawaban buatan 8memory, bukan UI asli CLI. Perintah khusus terminal seperti `/login` tidak tersedia, dan login tetap dilakukan di CLI provider.
+- Sesi non-interaktif tidak menampilkan dialog kepercayaan folder, jadi hook dan server MCP milik proyek ikut berjalan. Pilih hanya folder yang kamu percaya.
+- `claude -p` memakai batas langganan yang sama dengan Claude Code biasa selama kamu login dengan paket Claude, sesuai [ketentuan Anthropic](https://support.claude.com/en/articles/15036540).
+- Kalau hook `UserPromptSubmit` aktif, node dari Chat dipakai dan prompt tidak tercatat dua kali.
+- Isi percakapan hanya ada di layar selama sesi. Yang tersimpan di 8memory hanya node journey dan memori yang ditulis AI.
 
 Perilaku editor diadaptasi dari [oh my pi](https://github.com/can1357/oh-my-pi). Kodenya ditulis sendiri untuk proyek ini.
 

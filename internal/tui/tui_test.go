@@ -287,7 +287,7 @@ func TestSwitchToServerBackend(t *testing.T) {
 func TestProgramStartsAndQuits(t *testing.T) {
 	f := newFixture(t)
 	model := New(f.configPath, f.source)
-	if view := model.render(); !strings.Contains(view, "Penyimpanan") || !strings.Contains(view, "ToCLI") {
+	if view := model.render(); !strings.Contains(view, "Storage") || !strings.Contains(view, "Chat") {
 		t.Fatal(view)
 	}
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("q")), tea.WithOutput(io.Discard))

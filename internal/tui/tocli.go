@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -46,21 +44,21 @@ const (
 	tocliFieldFolder
 )
 
-const editorRows = 8
-
 // tocliPlan is what was shown in the preview and will be sent.
 type tocliPlan struct {
 	nodeID   string
 	typed    string
 	briefing compose.Result
 	warnings []string
+	shown    bool // the user saw this plan before it was sent
 }
 
 type tocliState struct {
-	provider int
-	focus    int
-	folder   textinput.Model
-	formErr  string
+	provider       int
+	providerCursor int
+	focus          int
+	folder         textinput.Model
+	formErr        string
 
 	exe     tocli.Executable
 	dir     string
@@ -80,8 +78,27 @@ type tocliState struct {
 	previewText []string
 	offset      int
 
-	plan        tocliPlan
-	lastCommand *exec.Cmd
+	plan tocliPlan
+
+	chatCtx    context.Context
+	chatCancel context.CancelFunc
+	inbox      chan tocliInboxMsg
+	approvals  *tocli.ApprovalServer
+
+	entries  []*chatEntry
+	scroll   int // rows above the bottom of the transcript
+	session  string
+	sending  bool // a prompt is being prepared
+	running  bool // the CLI is working on a prompt
+	stop     context.CancelFunc
+	turnCtx  context.Context
+	finished chan struct{}
+
+	exitArmed   bool
+	slashCursor int
+
+	pending        []*tocli.Approval
+	approvalOffset int
 }
 
 type (
@@ -101,10 +118,6 @@ type (
 	}
 	tocliLaunchMsg struct {
 		cmd    *exec.Cmd
-		nodeID string
-		err    error
-	}
-	tocliDoneMsg struct {
 		nodeID string
 		err    error
 	}
@@ -141,22 +154,44 @@ func (m *Model) updateToCLIForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		if t.focus == tocliFieldProvider {
+			t.providerCursor = t.provider
+			m.screen = screenProviderPick
+			return m, nil
+		}
 		t.formErr = ""
 		return m, m.prepareToCLI()
 	}
 	if t.focus == tocliFieldProvider {
-		count := len(tocli.Providers)
-		switch msg.String() {
-		case "left", "h":
-			t.provider = (t.provider + count - 1) % count
-		case "right", "l", "space":
-			t.provider = (t.provider + 1) % count
-		}
 		return m, nil
 	}
 	var cmd tea.Cmd
 	t.folder, cmd = t.folder.Update(msg)
 	return m, cmd
+}
+
+// updateProviderPick moves on to the folder after a choice, since that is the
+// only field left before the chat opens.
+func (m *Model) updateProviderPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	t := &m.tocli
+	switch msg.String() {
+	case "up", "k":
+		if t.providerCursor > 0 {
+			t.providerCursor--
+		}
+	case "down", "j":
+		if t.providerCursor < len(tocli.Providers)-1 {
+			t.providerCursor++
+		}
+	case "enter":
+		t.provider, t.formErr = t.providerCursor, ""
+		t.focus = tocliFieldFolder
+		t.folder.Focus()
+		m.screen = screenToCLIForm
+	case "q", "esc":
+		m.screen = screenToCLIForm
+	}
+	return m, nil
 }
 
 // prepareToCLI checks the CLI and folder before any typing is wasted on them.
@@ -186,8 +221,12 @@ func (m *Model) handleToCLIReady(msg tocliReadyMsg) (tea.Model, tea.Cmd) {
 	}
 	t.exe, t.dir, t.project, t.branch = msg.exe, msg.dir, msg.here.Project, msg.here.Branch
 	t.status, t.statusErr = "", false
+	if err := m.openChat(); err != nil {
+		t.formErr = err.Error()
+		return m, nil
+	}
 	m.screen = screenEditor
-	return m, setWin32Input(true)
+	return m, tea.Batch(setWin32Input(true), m.listen(t.inbox, t.chatCtx))
 }
 
 func (m *Model) setEditorStatus(text string, isError bool) {
@@ -196,12 +235,27 @@ func (m *Model) setEditorStatus(text string, isError bool) {
 
 func (m *Model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	t := &m.tocli
+	if len(t.pending) > 0 {
+		return m.updateApproval(msg)
+	}
 	if t.asking {
 		return m.updatePathInput(msg)
+	}
+	if matches := m.slashMatches(); len(matches) > 0 {
+		if model, cmd, handled := m.updateSlashMenu(msg, matches); handled {
+			return model, cmd
+		}
+	}
+	if msg.String() != "esc" {
+		t.exitArmed = false
 	}
 	switch msg.String() {
 	case "enter":
 		return m, m.startPlan()
+	case "pgup":
+		t.scroll += m.bodyHeight()
+	case "pgdown":
+		t.scroll = max(t.scroll-m.bodyHeight(), 0)
 	case "shift+enter", "alt+enter", "ctrl+enter", "ctrl+j":
 		t.editor.insert("\n")
 	case "left":
@@ -240,8 +294,7 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		t.listCursor = min(t.listCursor, len(t.attachments)-1)
 		m.screen = screenAttachments
 	case "esc":
-		m.screen = screenToCLIForm
-		return m, setWin32Input(false)
+		return m.escapeChat()
 	default:
 		// A bare Ctrl press arrives as ctrl+space on some consoles; Text is
 		// only set for keys that actually type something.
@@ -271,6 +324,25 @@ func (m *Model) updatePathInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	t.pathInput, cmd = t.pathInput.Update(msg)
 	return m, cmd
+}
+
+// escapeChat stops a running prompt. Otherwise it leaves the session, asking
+// once first because the transcript is only kept on screen.
+func (m *Model) escapeChat() (tea.Model, tea.Cmd) {
+	t := &m.tocli
+	if t.running {
+		m.stopTurn()
+		m.setEditorStatus("Menghentikan...", false)
+		return m, nil
+	}
+	if len(t.entries) > 0 && !t.exitArmed {
+		t.exitArmed = true
+		m.setEditorStatus("Tekan esc sekali lagi untuk mengakhiri sesi ini.", false)
+		return m, nil
+	}
+	m.closeChat()
+	m.screen = screenToCLIForm
+	return m, setWin32Input(false)
 }
 
 // addAttachment registers a new attachment and places its marker at the cursor.
@@ -307,6 +379,9 @@ func (m *Model) pasteThresholds() (int, int) {
 // handlePaste sends pasted text to whatever is focused; in the editor a long
 // paste collapses into an attachment.
 func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	if m.screen == screenEditor && len(m.tocli.pending) > 0 {
+		return m, nil
+	}
 	if m.screen == screenEditor && !m.tocli.asking {
 		text := tocli.NormalizePaste(msg.Content)
 		if lines, bytes := m.pasteThresholds(); tocli.IsLongPaste(text, lines, bytes) {
@@ -415,12 +490,17 @@ func (m *Model) updateAttachPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // preview shows exactly the text that will be sent.
 func (m *Model) startPlan() tea.Cmd {
 	t := &m.tocli
+	if t.running || t.sending {
+		m.setEditorStatus(waitForReplyNote, false)
+		return nil
+	}
 	typed := t.editor.value()
 	clean := tocli.StripMarkers(typed, t.attachments)
 	if strings.TrimSpace(clean) == "" && len(t.attachments) == 0 {
 		m.setEditorStatus("Prompt masih kosong.", true)
 		return nil
 	}
+	t.sending = true
 	warnings := tocli.Warnings(m.currentProvider(), t.attachments)
 	project, branch := t.project, t.branch
 	return m.useStore(func(ctx context.Context, s store.Store) tea.Msg {
@@ -428,7 +508,7 @@ func (m *Model) startPlan() tea.Cmd {
 		if err != nil {
 			return tocliPlanMsg{err: err}
 		}
-		briefing, err := compose.Build(ctx, s, compose.Input{Project: project, Branch: branch, Prompt: clean, NodeID: nodeID})
+		briefing, err := compose.Build(ctx, s, compose.Input{Project: project, Branch: branch, NodeID: nodeID})
 		if err != nil {
 			return tocliPlanMsg{err: err}
 		}
@@ -436,13 +516,20 @@ func (m *Model) startPlan() tea.Cmd {
 	}, func(err error) tea.Msg { return tocliPlanMsg{err: err} })
 }
 
+// handlePlan sends the prompt straight away, as a CLI does. It only stops
+// first when an attachment would not arrive, so nothing is dropped silently.
 func (m *Model) handlePlan(msg tocliPlanMsg) (tea.Model, tea.Cmd) {
+	t := &m.tocli
 	if msg.err != nil {
+		t.sending = false
 		m.setEditorStatus(msg.err.Error(), true)
 		return m, nil
 	}
-	t := &m.tocli
 	t.plan, t.offset = msg.plan, 0
+	if len(msg.plan.warnings) == 0 {
+		return m, m.launch()
+	}
+	t.sending, t.plan.shown = false, true
 	body := lipgloss.NewStyle().Width(m.viewWidth() - 2).Render(msg.plan.briefing.Text)
 	t.previewText = strings.Split(body, "\n")
 	m.screen = screenCLIPreview
@@ -461,8 +548,8 @@ func (m *Model) updateCLIPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t.offset++
 		}
 	case "enter":
-		m.busyLabel = "Menjalankan " + m.currentProvider().Label() + "..."
-		m.screen = screenBusy
+		t.sending = true
+		m.screen = screenEditor
 		return m, m.launch()
 	case "esc", "q":
 		m.screen = screenEditor
@@ -470,24 +557,51 @@ func (m *Model) updateCLIPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// memoryServer describes this program as the MCP server of the CLI, so the AI
+// has its memory tools without the user registering anything.
+func (m *Model) memoryServer() (*tocli.MCPServer, error) {
+	program, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	config, err := filepath.Abs(m.configPath)
+	if err != nil {
+		return nil, err
+	}
+	return &tocli.MCPServer{Type: "stdio", Command: program, Args: []string{"serve", "--config", config}}, nil
+}
+
 // launch saves attachments, then records the node and pending marker last, so
 // a command that cannot be built leaves no trace in the journey.
 func (m *Model) launch() tea.Cmd {
 	t := &m.tocli
-	plan, project, branch, dir, exe := t.plan, t.project, t.branch, t.dir, t.exe
+	plan, project, branch, dir, exe, session := t.plan, t.project, t.branch, t.dir, t.exe, t.session
 	provider, attachments := m.currentProvider(), slices.Clone(t.attachments)
 	attachmentsDir, configDir := m.attachmentsDir(), m.configDir()
+	var approval *tocli.MCPServer
+	if t.approvals != nil {
+		approval = t.approvals.Server()
+	}
+	memory, memoryErr := m.memoryServer()
+	turnCtx, stop := context.WithCancel(t.chatCtx)
+	t.stop, t.turnCtx = stop, turnCtx
 	return m.useStore(func(ctx context.Context, s store.Store) tea.Msg {
 		fail := func(err error) tea.Msg { return tocliLaunchMsg{err: err} }
+		if memoryErr != nil {
+			return fail(memoryErr)
+		}
 		saved, err := tocli.Save(attachmentsDir, plan.nodeID, attachments)
 		if err != nil {
 			return fail(err)
 		}
-		request := tocli.Request{Context: plan.briefing.Text, Prompt: plan.typed, Attachments: saved}
+		request := tocli.Request{
+			Full: plan.briefing.Text, System: plan.briefing.System, Turn: plan.briefing.Turn,
+			Prompt: plan.typed, Attachments: saved, Session: session, Memory: memory, Approval: approval,
+		}
 		if len(saved) > 0 {
 			request.AttachDir, _ = tocli.NodeDir(attachmentsDir, plan.nodeID)
 		}
-		cmd, err := tocli.Build(provider, exe, dir, plan.nodeID, request)
+		cmd, err := tocli.Build(turnCtx, provider, exe, dir, plan.nodeID, request)
 		if err != nil {
 			tocli.RemoveSaved(attachmentsDir, plan.nodeID)
 			return fail(err)
@@ -508,110 +622,56 @@ func (m *Model) launch() tea.Cmd {
 }
 
 func (m *Model) handleLaunch(msg tocliLaunchMsg) (tea.Model, tea.Cmd) {
+	t := &m.tocli
+	t.sending = false
 	if msg.err != nil {
-		m.screen = screenEditor
+		m.stopTurn()
 		m.setEditorStatus(msg.err.Error(), true)
 		return m, nil
 	}
-	m.tocli.lastCommand = msg.cmd
-	nodeID := msg.nodeID
-	return m, tea.Exec(&handoff{Cmd: msg.cmd}, func(err error) tea.Msg {
-		return tocliDoneMsg{nodeID: nodeID, err: err}
-	})
-}
-
-func (m *Model) handleDone(msg tocliDoneMsg) (tea.Model, tea.Cmd) {
-	tocli.ClearPending(m.configDir(), msg.nodeID)
-	label := m.currentProvider().Label()
-	m.tocli.editor.reset()
-	m.tocli.attachments = nil
-	m.screen = screenMenu
-	m.notice, m.noticeErr = label+" ditutup.", false
-	if msg.err != nil {
-		m.notice, m.noticeErr = label+" berakhir dengan pesan: "+msg.err.Error(), true
+	m.addEntry(chatUser, t.plan.typed)
+	if !t.plan.shown {
+		for _, line := range m.cutReport(t.plan.briefing) {
+			m.addEntry(chatInfo, line)
+		}
 	}
+	t.editor.reset()
+	t.attachments, t.nextID, t.scroll = nil, 0, 0
+	m.setEditorStatus("", false)
+	m.startTurn(msg.cmd, msg.nodeID, m.currentProvider().NewParser())
 	return m, nil
-}
-
-// handoff gives the terminal to the provider CLI after switching off the
-// input mode that only this TUI understands.
-type handoff struct{ *exec.Cmd }
-
-func (h *handoff) Run() error {
-	if runtime.GOOS == "windows" {
-		os.Stdout.WriteString(win32InputOff)
-	}
-	return h.Cmd.Run()
-}
-
-func (h *handoff) SetStdin(r io.Reader) {
-	if h.Stdin == nil {
-		h.Stdin = r
-	}
-}
-
-func (h *handoff) SetStdout(w io.Writer) {
-	if h.Stdout == nil {
-		h.Stdout = w
-	}
-}
-
-func (h *handoff) SetStderr(w io.Writer) {
-	if h.Stderr == nil {
-		h.Stderr = w
-	}
 }
 
 func (m *Model) viewToCLIForm(b *strings.Builder) {
 	t := &m.tocli
-	b.WriteString("ToCLI\n\n")
-	var names []string
-	for i, provider := range tocli.Providers {
-		label := provider.Label()
-		if i == t.provider {
-			label = "[" + label + "]"
-		}
-		names = append(names, label)
-	}
-	providerMark, folderMark := "> ", "  "
+	b.WriteString("Chat\n\n")
+	providerMark, folderMark, hint := "> ", "  ", "tab pindah · enter pilih provider · esc kembali"
 	if t.focus == tocliFieldFolder {
-		providerMark, folderMark = "  ", "> "
+		providerMark, folderMark, hint = "  ", "> ", "tab pindah · enter mulai chat · esc kembali"
 	}
-	fmt.Fprintf(b, "%s%-9s %s\n", providerMark, "Provider", strings.Join(names, " "))
+	fmt.Fprintf(b, "%s%-9s %s ▸\n", providerMark, "Provider", m.currentProvider().Label())
 	fmt.Fprintf(b, "%s%-9s %s\n", folderMark, "Folder", t.folder.View())
 	if t.formErr != "" {
 		b.WriteString("\n" + errorStyle.Width(m.viewWidth()-2).Render(t.formErr) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("tab pindah · ←/→ ganti provider · enter lanjut · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render(hint) + "\n")
+}
+
+func (m *Model) viewProviderPick(b *strings.Builder) {
+	b.WriteString("Provider\n\n")
+	for i, provider := range tocli.Providers {
+		marker := "  "
+		if i == m.tocli.providerCursor {
+			marker = "> "
+		}
+		b.WriteString(marker + provider.Label() + "\n")
+	}
+	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter pakai · esc kembali") + "\n")
 }
 
 func (m *Model) location() string {
 	t := &m.tocli
 	return orDash(t.project) + " @ " + orDash(t.branch)
-}
-
-func (m *Model) viewEditor(b *strings.Builder) {
-	t := &m.tocli
-	fmt.Fprintf(b, "ToCLI · %s · %s\n\n", m.currentProvider().Label(), m.location())
-	b.WriteString(t.editor.render(m.viewWidth()-2, editorRows) + "\n\n")
-	if t.asking {
-		b.WriteString("Path file: " + t.pathInput.View() + "\n")
-	}
-	if len(t.attachments) > 0 {
-		b.WriteString(dimStyle.Render(strconv.Itoa(len(t.attachments))+" attachment") + "\n")
-	}
-	if t.status != "" {
-		style := dimStyle
-		if t.statusErr {
-			style = errorStyle
-		}
-		b.WriteString(style.Width(m.viewWidth()-2).Render(t.status) + "\n")
-	}
-	if t.asking {
-		b.WriteString(dimStyle.Render("enter tambahkan · esc batal") + "\n")
-		return
-	}
-	b.WriteString(dimStyle.Width(m.viewWidth()-2).Render("enter kirim · shift+enter atau ctrl+j baris baru · alt+v gambar clipboard · ctrl+o file · ctrl+e attachment · esc kembali") + "\n")
 }
 
 func (m *Model) viewAttachments(b *strings.Builder) {
@@ -664,12 +724,6 @@ func (m *Model) cutReport(r compose.Result) []string {
 	var out []string
 	if len(r.DroppedRules) > 0 {
 		out = append(out, fmt.Sprintf("Terpotong: %d aturan tidak muat: %s", len(r.DroppedRules), summarize(r.DroppedRules)))
-	}
-	if len(r.DroppedMemories) > 0 {
-		out = append(out, fmt.Sprintf("Terpotong: %d memori tidak muat: %s", len(r.DroppedMemories), summarize(r.DroppedMemories)))
-	}
-	if len(r.ShortenedMemories) > 0 {
-		out = append(out, fmt.Sprintf("Dipendekkan: %d memori: %s", len(r.ShortenedMemories), summarize(r.ShortenedMemories)))
 	}
 	return out
 }

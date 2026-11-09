@@ -16,9 +16,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 
 	"8memory/internal/config"
 	"8memory/internal/store"
+	"8memory/internal/tocli"
 )
 
 const connectTimeout = 20 * time.Second
@@ -44,6 +46,7 @@ const (
 	screenRules
 	screenRuleForm
 	screenToCLIForm
+	screenProviderPick
 	screenEditor
 	screenAttachments
 	screenAttachPreview
@@ -125,12 +128,14 @@ type Model struct {
 	noticeErr    bool
 	rules        rulesState
 	tocli        tocliState
+	listen       func(chan tocliInboxMsg, context.Context) tea.Cmd
+	runTurn      turnRunner
 }
 
 // New creates the TUI model for the given config.
 func New(configPath string, current config.Config) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Model{ctx: ctx, cancel: cancel, configPath: configPath, current: current}
+	m := &Model{ctx: ctx, cancel: cancel, configPath: configPath, current: current, listen: listenInbox, runTurn: tocli.Run}
 	for i, option := range backendOptions {
 		if option.backend == current.Backend {
 			m.cursor = i
@@ -145,7 +150,9 @@ func Run(configPath string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(New(configPath, current)).Run()
+	model := New(configPath, current)
+	_, err = tea.NewProgram(model).Run()
+	model.shutdown()
 	// The editor may be open when the program ends.
 	if runtime.GOOS == "windows" {
 		os.Stdout.WriteString(win32InputOff)
@@ -175,10 +182,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePlan(msg)
 	case tocliLaunchMsg:
 		return m.handleLaunch(msg)
-	case tocliDoneMsg:
-		return m.handleDone(msg)
+	case tocliInboxMsg:
+		return m.handleInbox(msg)
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
+			if m.screen == screenEditor && m.tocli.running {
+				m.stopTurn()
+				return m, nil
+			}
 			m.cancel()
 			return m, tea.Quit
 		}
@@ -195,6 +206,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateRuleForm(msg)
 		case screenToCLIForm:
 			return m.updateToCLIForm(msg)
+		case screenProviderPick:
+			return m.updateProviderPick(msg)
 		case screenEditor:
 			return m.updateEditor(msg)
 		case screenAttachments:
@@ -234,7 +247,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var menuItems = []string{"Journey", "Memori", "Aturan", "ToCLI", "Penyimpanan"}
+type menuItem struct{ label, description string }
+
+var menuItems = []menuItem{
+	{"Journey", "Timeline of every prompt"},
+	{"Memory", "Search what the AI recorded"},
+	{"Rules", "Instructions sent with every prompt"},
+	{"Chat", "Talk to the AI through Claude Code or Codex"},
+	{"Storage", "Choose the database backend"},
+}
 
 const (
 	menuJourney = iota
@@ -565,7 +586,7 @@ func (m *Model) View() tea.View {
 func (m *Model) render() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("8memory") + "\n")
-	b.WriteString(dimStyle.Render("Aktif: "+m.current.Describe()) + "\n\n")
+	b.WriteString(dimStyle.Render("Active: "+m.current.Describe()) + "\n\n")
 
 	switch m.screen {
 	case screenMenu:
@@ -580,6 +601,8 @@ func (m *Model) render() string {
 		m.viewRuleForm(&b)
 	case screenToCLIForm:
 		m.viewToCLIForm(&b)
+	case screenProviderPick:
+		m.viewProviderPick(&b)
 	case screenEditor:
 		m.viewEditor(&b)
 	case screenAttachments:
@@ -609,12 +632,14 @@ func (m *Model) render() string {
 }
 
 func (m *Model) viewMenu(b *strings.Builder) {
+	const labelWidth = 9
+	room := max(m.viewWidth()-labelWidth-4, 0)
 	for i, item := range menuItems {
-		marker := "  "
+		marker, label := "  ", fmt.Sprintf("%-*s", labelWidth, item.label)
 		if i == m.menu {
-			marker = "> "
+			marker, label = "> ", titleStyle.Render(label)
 		}
-		b.WriteString(marker + item + "\n")
+		b.WriteString(marker + label + " " + dimStyle.Render(runewidth.Truncate(item.description, room, "…")) + "\n")
 	}
 	if m.notice != "" {
 		style := okStyle
@@ -623,7 +648,7 @@ func (m *Model) viewMenu(b *strings.Builder) {
 		}
 		b.WriteString("\n" + style.Width(m.viewWidth()-2).Render(m.notice) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter buka · q keluar") + "\n")
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select · enter open · q quit") + "\n")
 }
 
 func (m *Model) viewPick(b *strings.Builder) {

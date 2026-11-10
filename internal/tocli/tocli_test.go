@@ -27,17 +27,17 @@ func provider(t *testing.T, id string) Provider {
 }
 
 func TestClaudeArguments(t *testing.T) {
-	paste := NewPaste(1, "isi")
+	paste := NewPaste(1, "text")
 	paste.SavedPath = "/a/paste-1.txt"
 	image := NewImage(2, []byte("x"))
 	image.SavedPath = "/a/image-2.png"
 	args := provider(t, "claude").Args(Request{
-		System: "ATURAN", Turn: "KONTEKS", AttachDir: "/a", Attachments: []Attachment{paste, image},
-		Prompt: "lihat " + paste.Marker + " dan " + image.Marker,
+		System: "RULES", Turn: "CONTEXT", AttachDir: "/a", Attachments: []Attachment{paste, image},
+		Prompt: "see " + paste.Marker + " and " + image.Marker,
 	})
 	want := []string{
 		"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto",
-		"--append-system-prompt", "ATURAN", "--add-dir", "/a", "--", "KONTEKS\n\nlihat @/a/paste-1.txt dan /a/image-2.png",
+		"--append-system-prompt", "RULES", "--add-dir", "/a", "--", "CONTEXT\n\nsee @/a/paste-1.txt and /a/image-2.png",
 	}
 	if !slices.Equal(args, want) {
 		t.Fatalf("%q", args)
@@ -46,11 +46,11 @@ func TestClaudeArguments(t *testing.T) {
 
 func TestClaudeContinuesSessionAndAsksThroughTheTUI(t *testing.T) {
 	args := provider(t, "claude").Args(Request{
-		Prompt: "lanjut", Session: "sesi-1",
+		Prompt: "continue", Session: "session-1",
 		Memory:   &MCPServer{Type: "stdio", Command: `C:\a\8memory.exe`, Args: []string{"serve", "--config", `C:\a\c.json`}},
 		Approval: &MCPServer{Type: "http", URL: "http://127.0.0.1:1/mcp"},
 	})
-	for _, pair := range [][2]string{{"--resume", "sesi-1"}, {"--permission-prompt-tool", approvalToolRef}, {"--allowedTools", memoryTools}} {
+	for _, pair := range [][2]string{{"--resume", "session-1"}, {"--permission-prompt-tool", approvalToolRef}, {"--allowedTools", memoryTools}} {
 		index := slices.Index(args, pair[0])
 		if index < 0 || args[index+1] != pair[1] {
 			t.Fatalf("%v missing in %q", pair, args)
@@ -77,24 +77,24 @@ func TestClaudeContinuesSessionAndAsksThroughTheTUI(t *testing.T) {
 }
 
 func TestClaudeKeepsSlashCommandFirst(t *testing.T) {
-	args := provider(t, "claude").Args(Request{Turn: "KONTEKS", Prompt: "/mcp"})
+	args := provider(t, "claude").Args(Request{Turn: "CONTEXT", Prompt: "/mcp"})
 	if args[len(args)-1] != "/mcp" {
 		t.Fatalf("%q", args)
 	}
 }
 
 func TestClaudeOmitsAddDirWithoutAttachments(t *testing.T) {
-	args := provider(t, "claude").Args(Request{System: "K", Prompt: "- mulai dengan strip"})
+	args := provider(t, "claude").Args(Request{System: "K", Prompt: "- starts with a dash"})
 	if slices.Contains(args, "--add-dir") || args[len(args)-2] != "--" {
 		t.Fatalf("%q", args)
 	}
 }
 
 func TestClaudeQuotesPathsWithSpaces(t *testing.T) {
-	paste := NewPaste(1, "isi")
-	paste.SavedPath = "/nama saya/p.txt"
+	paste := NewPaste(1, "text")
+	paste.SavedPath = "/my name/p.txt"
 	args := provider(t, "claude").Args(Request{Prompt: paste.Marker, Attachments: []Attachment{paste}, AttachDir: "/d"})
-	if got := args[len(args)-1]; got != `"/nama saya/p.txt"` {
+	if got := args[len(args)-1]; got != `"/my name/p.txt"` {
 		t.Fatal(got)
 	}
 }
@@ -102,21 +102,35 @@ func TestClaudeQuotesPathsWithSpaces(t *testing.T) {
 func TestCodexArguments(t *testing.T) {
 	image := NewImage(1, []byte("x"))
 	image.SavedPath = "/a/image-1.png"
-	paste := NewPaste(2, "isi")
+	paste := NewPaste(2, "text")
 	paste.SavedPath = "/a/paste-2.txt"
 	request := Request{
-		Full: "KONTEKS", Attachments: []Attachment{image, paste},
-		Prompt: "lihat " + image.Marker + " " + paste.Marker,
+		Full: "CONTEXT", Attachments: []Attachment{image, paste},
+		Prompt: "see " + image.Marker + " " + paste.Marker,
 	}
 	common := []string{"--json", "--skip-git-repo-check", "-c", `sandbox_mode="workspace-write"`, "--image", "/a/image-1.png", "--"}
-	want := append(append([]string{"exec"}, common...), "KONTEKS\n\nlihat [image 1]")
+	want := append(append([]string{"exec"}, common...), "CONTEXT\n\nsee [image 1]")
 	if args := provider(t, "codex").Args(request); !slices.Equal(args, want) {
 		t.Fatalf("%q", args)
 	}
-	request.Session = "sesi-1"
-	want = append(append([]string{"exec", "resume"}, common...), "sesi-1", "KONTEKS\n\nlihat [image 1]")
+	request.Session = "session-1"
+	want = append(append([]string{"exec", "resume"}, common...), "session-1", "CONTEXT\n\nsee [image 1]")
 	if args := provider(t, "codex").Args(request); !slices.Equal(args, want) {
 		t.Fatalf("%q", args)
+	}
+}
+
+func TestEffortFlags(t *testing.T) {
+	claude := provider(t, "claude").Args(Request{Prompt: "x", Effort: "high"})
+	if index := slices.Index(claude, "--effort"); index < 0 || claude[index+1] != "high" || index > slices.Index(claude, "--") {
+		t.Fatalf("%q", claude)
+	}
+	codex := provider(t, "codex").Args(Request{Prompt: "x", Effort: "high", Session: "session-1"})
+	if !slices.Contains(codex, `model_reasoning_effort="high"`) || slices.Index(codex, `model_reasoning_effort="high"`) > slices.Index(codex, "--") {
+		t.Fatalf("%q", codex)
+	}
+	if slices.Contains(provider(t, "codex").Args(Request{Prompt: "x"}), `model_reasoning_effort=""`) {
+		t.Fatal("no effort must send nothing")
 	}
 }
 
@@ -141,10 +155,10 @@ func TestCodexConnectsMemoryThroughConfigOverrides(t *testing.T) {
 }
 
 func TestWarningsNameEveryUnsupportedAttachment(t *testing.T) {
-	paste := NewPaste(1, "isi")
+	paste := NewPaste(1, "text")
 	image := NewImage(2, []byte("x"))
 	warnings := Warnings(provider(t, "codex"), []Attachment{paste, image})
-	if len(warnings) != 1 || !strings.Contains(warnings[0], paste.Marker) || !strings.Contains(warnings[0], "TIDAK dikirim") {
+	if len(warnings) != 1 || !strings.Contains(warnings[0], paste.Marker) || !strings.Contains(warnings[0], "NOT be sent") {
 		t.Fatalf("%q", warnings)
 	}
 	if got := Warnings(provider(t, "claude"), []Attachment{paste, image}); len(got) != 0 {
@@ -271,32 +285,35 @@ func TestNormalizePaste(t *testing.T) {
 }
 
 func TestPasteMarkerCountsLines(t *testing.T) {
-	if got := NewPaste(1, strings.Repeat("x\n", 120)).Marker; got != "[Paste #1 · 120 baris]" {
+	if got := NewPaste(1, "x").Marker; got != "[Paste #1 · 1 line]" {
+		t.Fatal(got)
+	}
+	if got := NewPaste(1, strings.Repeat("x\n", 120)).Marker; got != "[Paste #1 · 120 lines]" {
 		t.Fatal(got)
 	}
 }
 
 func TestNewFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cat[a]tan 1.TXT")
-	if err := os.WriteFile(path, []byte("isi"), 0o600); err != nil {
+	path := filepath.Join(dir, "no[t]e 1.TXT")
+	if err := os.WriteFile(path, []byte("text"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	a, err := NewFile(4, `"`+path+`"`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Kind != KindFile || a.SourcePath != path || a.Marker != "[File #4 · cat(a)tan 1.TXT]" || strings.ContainsAny(a.Name, " []") {
+	if a.Kind != KindFile || a.SourcePath != path || a.Marker != "[File #4 · no(t)e 1.TXT]" || strings.ContainsAny(a.Name, " []") {
 		t.Fatalf("%+v", a)
 	}
-	image := filepath.Join(dir, "layar.PNG")
+	image := filepath.Join(dir, "screen.PNG")
 	if err := os.WriteFile(image, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := NewFile(5, image); err != nil || b.Kind != KindImage {
 		t.Fatalf("%+v, %v", b, err)
 	}
-	for _, bad := range []string{"", dir, filepath.Join(dir, "tidak-ada")} {
+	for _, bad := range []string{"", dir, filepath.Join(dir, "missing")} {
 		if _, err := NewFile(6, bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
@@ -304,19 +321,19 @@ func TestNewFile(t *testing.T) {
 }
 
 func TestSaveAndRemove(t *testing.T) {
-	base, source := t.TempDir(), filepath.Join(t.TempDir(), "asal.txt")
-	if err := os.WriteFile(source, []byte("isi file"), 0o600); err != nil {
+	base, source := t.TempDir(), filepath.Join(t.TempDir(), "source.txt")
+	if err := os.WriteFile(source, []byte("file text"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	file, err := NewFile(2, source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved, err := Save(base, testNode, []Attachment{NewPaste(1, "isi paste"), file})
+	saved, err := Save(base, testNode, []Attachment{NewPaste(1, "paste text"), file})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, want := range []string{"isi paste", "isi file"} {
+	for i, want := range []string{"paste text", "file text"} {
 		if filepath.Dir(saved[i].SavedPath) != filepath.Join(base, testNode) {
 			t.Fatal(saved[i].SavedPath)
 		}
@@ -359,23 +376,23 @@ func TestPendingIsClaimedOnce(t *testing.T) {
 }
 
 func TestTitleUsesTypedTextOnly(t *testing.T) {
-	paste := NewPaste(1, "BARIS RAHASIA DARI PASTE")
-	if got := Title("\n"+paste.Marker+"  perbaiki   bug\nbaris dua", []Attachment{paste}); got != "perbaiki bug" {
+	paste := NewPaste(1, "SECRET LINE FROM PASTE")
+	if got := Title("\n"+paste.Marker+"  fix   bug\nline two", []Attachment{paste}); got != "fix bug" {
 		t.Fatal(got)
 	}
-	if got := Title(paste.Marker, []Attachment{paste}); got != "(hanya attachment)" {
+	if got := Title(paste.Marker, []Attachment{paste}); got != "(attachments only)" {
 		t.Fatal(got)
 	}
 }
 
 func TestPreview(t *testing.T) {
-	if got := Preview(NewPaste(1, "halo dunia")); !strings.Contains(got, "halo dunia") {
+	if got := Preview(NewPaste(1, "hello world")); !strings.Contains(got, "hello world") {
 		t.Fatal(got)
 	}
-	if got := Preview(NewImage(2, []byte("\x89PNG"))); strings.Contains(got, "PNG") || !strings.Contains(got, "tidak bisa ditampilkan") {
+	if got := Preview(NewImage(2, []byte("\x89PNG"))); strings.Contains(got, "PNG") || !strings.Contains(got, "cannot be shown") {
 		t.Fatal(got)
 	}
-	long := filepath.Join(t.TempDir(), "panjang.txt")
+	long := filepath.Join(t.TempDir(), "long.txt")
 	if err := os.WriteFile(long, []byte(strings.Repeat("认", previewBytes)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +409,7 @@ func TestValidatePNG(t *testing.T) {
 	if _, err := validatePNG(nil); !errors.Is(err, ErrNoImage) {
 		t.Fatal(err)
 	}
-	if _, err := validatePNG([]byte("bukan")); err == nil {
+	if _, err := validatePNG([]byte("not a png")); err == nil {
 		t.Fatal("accepted non-PNG data")
 	}
 	if got, err := validatePNG([]byte(string(pngSignature) + "x")); err != nil || len(got) != 9 {

@@ -21,9 +21,9 @@ const (
 	approvalToolName   = "approve"
 	approvalToolRef    = "mcp__" + approvalServerName + "__" + approvalToolName
 
-	deniedByUser      = "Ditolak oleh pengguna di 8memory."
+	deniedByUser      = "Denied by the user in 8memory."
 	askQuestionTool   = "AskUserQuestion"
-	askQuestionDenial = "8memory belum bisa menampilkan AskUserQuestion. Ajukan pertanyaannya sebagai teks biasa lalu akhiri giliranmu; pengguna akan menjawab di prompt berikutnya."
+	askQuestionDenial = "8memory cannot show AskUserQuestion yet. Ask the question as plain text and end your turn; the user will answer in the next prompt."
 )
 
 // Approval is one tool call waiting for the user's decision.
@@ -63,7 +63,7 @@ type ApprovalServer struct {
 func StartApprovals(onRequest func(*Approval)) (*ApprovalServer, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("server izin tidak bisa dimulai: %w", err)
+		return nil, fmt.Errorf("could not start the permission server: %w", err)
 	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {

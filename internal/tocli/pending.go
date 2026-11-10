@@ -17,7 +17,7 @@ import (
 func pendingPath(baseDir, nodeID string) (string, error) {
 	id, err := uuid.Parse(nodeID)
 	if err != nil {
-		return "", fmt.Errorf("node id tidak valid: %q", nodeID)
+		return "", fmt.Errorf("invalid node id: %q", nodeID)
 	}
 	return filepath.Join(baseDir, "tocli-pending", id.String()), nil
 }
@@ -65,5 +65,5 @@ func Title(typed string, attachments []Attachment) string {
 			return line
 		}
 	}
-	return "(hanya attachment)"
+	return "(attachments only)"
 }

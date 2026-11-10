@@ -86,7 +86,7 @@ func toEditor(t *testing.T, provider int) (*Model, *fixture, string) {
 	m.listen = func(chan tocliInboxMsg, context.Context) tea.Cmd { return nil }
 	m.runTurn = func(*exec.Cmd, tocli.Parser, func(tocli.Event)) error { return nil }
 	t.Cleanup(m.closeChat)
-	project := filepath.Join(t.TempDir(), "proyek-ku")
+	project := filepath.Join(t.TempDir(), "my-project")
 	if err := os.Mkdir(project, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestMissingCLIShowsClearMessage(t *testing.T) {
 	if m.screen != screenToCLIForm {
 		t.Fatalf("screen %d", m.screen)
 	}
-	expectView(t, m, []string{"tidak ditemukan", "npm install -g"}, nil)
+	expectView(t, m, []string{"not found", "npm install -g"}, nil)
 }
 
 func TestProviderSubMenuPicksFromList(t *testing.T) {
@@ -155,12 +155,12 @@ func TestEditorEnterSendsAndShiftEnterBreaksLine(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	typeText(m, "satu")
+	typeText(m, "one")
 	send(m, shiftEnter)
-	typeText(m, "dua")
+	typeText(m, "two")
 	send(m, ctrl('j'))
-	typeText(m, "tiga")
-	if got := m.tocli.editor.value(); got != "satu\ndua\ntiga" {
+	typeText(m, "three")
+	if got := m.tocli.editor.value(); got != "one\ntwo\nthree" {
 		t.Fatalf("%q", got)
 	}
 	send(m, enter)
@@ -175,7 +175,7 @@ func TestEmptyPromptIsRejected(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	send(m, enter)
-	if m.screen != screenEditor || !strings.Contains(m.tocli.status, "kosong") {
+	if m.screen != screenEditor || !strings.Contains(m.tocli.status, "empty") {
 		t.Fatalf("screen %d, status %q", m.screen, m.tocli.status)
 	}
 }
@@ -183,11 +183,11 @@ func TestEmptyPromptIsRejected(t *testing.T) {
 func TestLongPasteBecomesAttachment(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
-	send(m, tea.PasteMsg{Content: strings.Repeat("baris\r\n", 120)})
+	send(m, tea.PasteMsg{Content: strings.Repeat("line\r\n", 120)})
 	if len(m.tocli.attachments) != 1 || m.tocli.attachments[0].Lines != 120 {
 		t.Fatalf("%+v", m.tocli.attachments)
 	}
-	if got := m.tocli.editor.value(); got != "[Paste #1 · 120 baris]" {
+	if got := m.tocli.editor.value(); got != "[Paste #1 · 120 lines]" {
 		t.Fatalf("%q", got)
 	}
 	send(m, backspace)
@@ -218,17 +218,17 @@ func TestPasteThresholdIsConfigurable(t *testing.T) {
 func TestAttachmentPreviewAndDelete(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
-	typeText(m, "awal ")
-	send(m, tea.PasteMsg{Content: "ISI-TEMPELAN\n" + strings.Repeat("x\n", 30)})
+	typeText(m, "start ")
+	send(m, tea.PasteMsg{Content: "PASTE-CONTENT\n" + strings.Repeat("x\n", 30)})
 	send(m, ctrl('e'))
 	if m.screen != screenAttachments {
 		t.Fatalf("screen %d", m.screen)
 	}
 	send(m, enter)
-	expectView(t, m, []string{"ISI-TEMPELAN"}, nil)
+	expectView(t, m, []string{"PASTE-CONTENT"}, nil)
 	send(m, escape)
 	send(m, key('d'))
-	if m.screen != screenEditor || len(m.tocli.attachments) != 0 || m.tocli.editor.value() != "awal " {
+	if m.screen != screenEditor || len(m.tocli.attachments) != 0 || m.tocli.editor.value() != "start " {
 		t.Fatalf("screen %d, %q", m.screen, m.tocli.editor.value())
 	}
 }
@@ -236,18 +236,18 @@ func TestAttachmentPreviewAndDelete(t *testing.T) {
 func TestFileAttachmentByPath(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
-	path := filepath.Join(t.TempDir(), "catatan.txt")
-	if err := os.WriteFile(path, []byte("isi"), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(path, []byte("text"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	send(m, ctrl('o'))
 	send(m, tea.PasteMsg{Content: path})
 	send(m, enter)
-	if len(m.tocli.attachments) != 1 || !strings.Contains(m.tocli.editor.value(), "[File #1 · catatan.txt]") {
+	if len(m.tocli.attachments) != 1 || !strings.Contains(m.tocli.editor.value(), "[File #1 · notes.txt]") {
 		t.Fatalf("%q, status %q", m.tocli.editor.value(), m.tocli.status)
 	}
 	send(m, ctrl('o'))
-	typeText(m, "tidak-ada.txt")
+	typeText(m, "missing.txt")
 	send(m, enter)
 	if !m.tocli.statusErr || !m.tocli.asking {
 		t.Fatalf("status %q", m.tocli.status)
@@ -258,7 +258,7 @@ func TestClipboardImageResults(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	send(m, tocliImageMsg{err: tocli.ErrNoImage})
-	if !m.tocli.statusErr || !strings.Contains(m.tocli.status, "tidak berisi gambar") {
+	if !m.tocli.statusErr || !strings.Contains(m.tocli.status, "does not contain an image") {
 		t.Fatalf("%q", m.tocli.status)
 	}
 	send(m, tocliImageMsg{data: []byte("\x89PNG")})
@@ -275,17 +275,17 @@ func TestSendCreatesNodeSavesAttachmentsAndBuildsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddRule(ctx, store.Rule{Scope: store.ScopeGlobal, Text: "Selalu tulis test"}); err != nil {
+	if _, err := s.AddRule(ctx, store.Rule{Scope: store.ScopeGlobal, Text: "Always write tests"}); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
 
 	h := captureTurns(m)
-	typeText(m, "Perbaiki bug login ")
-	send(m, tea.PasteMsg{Content: "RAHASIA-PASTE\n" + strings.Repeat("x\n", 30)})
+	typeText(m, "Fix login bug ")
+	send(m, tea.PasteMsg{Content: "SECRET-PASTE\n" + strings.Repeat("x\n", 30)})
 	send(m, enter)
 	cmd := h.next(t)
-	if strings.Contains(m.tocli.plan.briefing.Text, "RAHASIA-PASTE") || !strings.Contains(m.tocli.plan.briefing.System, "Selalu tulis test") {
+	if strings.Contains(m.tocli.plan.briefing.Text, "SECRET-PASTE") || !strings.Contains(m.tocli.plan.briefing.System, "Always write tests") {
 		t.Fatalf("briefing %q", m.tocli.plan.briefing.Text)
 	}
 	mcpConfig := cmd.Args[slices.Index(cmd.Args, "--mcp-config")+1]
@@ -307,11 +307,11 @@ func TestSendCreatesNodeSavesAttachmentsAndBuildsCommand(t *testing.T) {
 	}
 	saved := filepath.Join(filepath.Dir(f.configPath), "attachments", nodeID, "paste-1.txt")
 	data, err := os.ReadFile(saved)
-	if err != nil || !strings.Contains(string(data), "RAHASIA-PASTE") {
+	if err != nil || !strings.Contains(string(data), "SECRET-PASTE") {
 		t.Fatalf("%q, %v", data, err)
 	}
 	prompt := cmd.Args[len(cmd.Args)-1]
-	if prompt != m.tocli.plan.briefing.Turn+"\n\nPerbaiki bug login @"+saved {
+	if prompt != m.tocli.plan.briefing.Turn+"\n\nFix login bug @"+saved {
 		t.Fatalf("%q", prompt)
 	}
 
@@ -324,10 +324,10 @@ func TestSendCreatesNodeSavesAttachmentsAndBuildsCommand(t *testing.T) {
 	if err != nil || len(nodes) != 1 {
 		t.Fatalf("%+v, %v", nodes, err)
 	}
-	if nodes[0].ID != nodeID || nodes[0].Title != "Perbaiki bug login" || nodes[0].Agent != "claude" || nodes[0].Project != "proyek-ku" {
+	if nodes[0].ID != nodeID || nodes[0].Title != "Fix login bug" || nodes[0].Agent != "claude" || nodes[0].Project != "my-project" {
 		t.Fatalf("%+v", nodes[0])
 	}
-	memories, err := s.Search(ctx, store.Query{Text: "RAHASIA"})
+	memories, err := s.Search(ctx, store.Query{Text: "SECRET"})
 	if err != nil || len(memories) != 0 {
 		t.Fatalf("attachment reached memory: %+v, %v", memories, err)
 	}
@@ -353,21 +353,21 @@ func TestLaterPromptsResumeWithoutPreview(t *testing.T) {
 	installFake(t, "claude")
 	m, f, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "sesi-1"})
-	emit(m, tocli.Event{Kind: tocli.EventText, Text: "Hal", Fresh: true})
-	emit(m, tocli.Event{Kind: tocli.EventText, Text: "o dunia"})
+	startPrompt(t, m, h, "first")
+	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "session-1"})
+	emit(m, tocli.Event{Kind: tocli.EventText, Text: "Hel", Fresh: true})
+	emit(m, tocli.Event{Kind: tocli.EventText, Text: "lo world"})
 	emit(m, tocli.Event{Kind: tocli.EventTool, Text: "Bash: git status"})
-	expectView(t, m, []string{"> pertama", "Halo dunia", "Bash: git status", "bekerja"}, nil)
+	expectView(t, m, []string{"> first", "Hello world", "Bash: git status", "working"}, nil)
 	h.finish(t, m, nil)
 
-	typeText(m, "kedua")
+	typeText(m, "second")
 	send(m, enter)
 	if m.screen != screenEditor {
 		t.Fatalf("screen %d", m.screen)
 	}
 	cmd := h.next(t)
-	if index := slices.Index(cmd.Args, "--resume"); index < 0 || cmd.Args[index+1] != "sesi-1" {
+	if index := slices.Index(cmd.Args, "--resume"); index < 0 || cmd.Args[index+1] != "session-1" {
 		t.Fatalf("%q", cmd.Args)
 	}
 	h.finish(t, m, nil)
@@ -399,8 +399,8 @@ func TestRulesThatDoNotFitAreReportedInChat(t *testing.T) {
 		}
 	}
 	s.Close()
-	startPrompt(t, m, h, "pertama")
-	expectView(t, m, []string{"Terpotong", "aturan tidak muat"}, nil)
+	startPrompt(t, m, h, "first")
+	expectView(t, m, []string{"Truncated", "did not fit"}, nil)
 	h.finish(t, m, nil)
 }
 
@@ -408,10 +408,10 @@ func TestPromptIsRefusedWhileOneIsRunning(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	typeText(m, "kedua")
+	startPrompt(t, m, h, "first")
+	typeText(m, "second")
 	send(m, enter)
-	if !strings.Contains(m.tocli.status, "Tunggu") || m.tocli.editor.value() != "kedua" {
+	if !strings.Contains(m.tocli.status, "Wait") || m.tocli.editor.value() != "second" {
 		t.Fatalf("status %q, editor %q", m.tocli.status, m.tocli.editor.value())
 	}
 	h.finish(t, m, nil)
@@ -421,13 +421,13 @@ func TestApprovalNeedsCtrlYAndHidesNothing(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	first, second := tocli.NewApproval("Bash", "command: rm -rf build"), tocli.NewApproval("Write", "file_path: a.txt")
 	emit(m, first)
 	emit(m, second)
-	expectView(t, m, []string{"Izin diminta: Bash", "rm -rf build", "1 lagi menunggu", "ctrl+y izinkan"}, nil)
+	expectView(t, m, []string{"Permission requested: Bash", "rm -rf build", "1 more waiting", "ctrl+y allow"}, nil)
 
-	typeText(m, "ya")
+	typeText(m, "yes")
 	send(m, enter)
 	select {
 	case <-first.Reply():
@@ -442,12 +442,12 @@ func TestApprovalNeedsCtrlYAndHidesNothing(t *testing.T) {
 	if !<-first.Reply() {
 		t.Fatal("ctrl+y must allow")
 	}
-	expectView(t, m, []string{"Izin diminta: Write"}, []string{"rm -rf build"})
+	expectView(t, m, []string{"Permission requested: Write"}, []string{"rm -rf build"})
 	send(m, escape)
 	if <-second.Reply() {
 		t.Fatal("esc must deny")
 	}
-	expectView(t, m, []string{"Diizinkan: Bash", "Ditolak: Write"}, nil)
+	expectView(t, m, []string{"Allowed: Bash", "Denied: Write"}, nil)
 	h.finish(t, m, nil)
 }
 
@@ -455,18 +455,18 @@ func TestLongApprovalCanBeReadToTheEnd(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	lines := make([]string, 40)
 	for i := range lines {
-		lines[i] = "baris"
+		lines[i] = "line"
 	}
-	lines[39] = "EKOR-PERINTAH"
+	lines[39] = "COMMAND-TAIL"
 	emit(m, tocli.NewApproval("Bash", strings.Join(lines, "\n")))
-	expectView(t, m, []string{"baris 1-10 dari 40"}, []string{"EKOR-PERINTAH"})
+	expectView(t, m, []string{"lines 1-10 of 40"}, []string{"COMMAND-TAIL"})
 	for range 39 {
 		send(m, down)
 	}
-	expectView(t, m, []string{"EKOR-PERINTAH"}, nil)
+	expectView(t, m, []string{"COMMAND-TAIL"}, nil)
 	send(m, escape)
 	h.finish(t, m, nil)
 }
@@ -475,7 +475,7 @@ func TestFinishedPromptDeniesWhatIsStillWaiting(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	waiting := tocli.NewApproval("Bash", "command: x")
 	emit(m, waiting)
 	h.finish(t, m, nil)
@@ -488,17 +488,17 @@ func TestEscStopsThenLeavesAfterConfirmation(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	turn := m.tocli.turnCtx
 	send(m, escape)
 	if turn.Err() == nil || m.screen != screenEditor {
 		t.Fatalf("esc must stop the prompt: %v, screen %d", turn.Err(), m.screen)
 	}
 	h.finish(t, m, nil)
-	expectView(t, m, []string{"Dihentikan"}, nil)
+	expectView(t, m, []string{"Stopped"}, nil)
 
 	send(m, escape)
-	if m.screen != screenEditor || !strings.Contains(m.tocli.status, "sekali lagi") {
+	if m.screen != screenEditor || !strings.Contains(m.tocli.status, "esc again") {
 		t.Fatalf("screen %d, status %q", m.screen, m.tocli.status)
 	}
 	send(m, escape)
@@ -511,7 +511,7 @@ func TestCtrlCStopsPromptInsteadOfQuitting(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	send(m, ctrl('c'))
 	if m.tocli.turnCtx.Err() == nil || m.ctx.Err() != nil {
 		t.Fatal("ctrl+c must stop only the prompt")
@@ -523,9 +523,9 @@ func TestFailedTurnIsShown(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	h.finish(t, m, errors.New("login dulu"))
-	expectView(t, m, []string{"login dulu"}, nil)
+	startPrompt(t, m, h, "first")
+	h.finish(t, m, errors.New("log in first"))
+	expectView(t, m, []string{"log in first"}, nil)
 }
 
 func TestLateMessageFromClosedSessionIsIgnored(t *testing.T) {
@@ -533,7 +533,7 @@ func TestLateMessageFromClosedSessionIsIgnored(t *testing.T) {
 	m, _, _ := toEditor(t, 0)
 	old := m.tocli.inbox
 	m.closeChat()
-	send(m, tocliInboxMsg{inbox: old, payload: tocli.Event{Kind: tocli.EventText, Text: "basi"}})
+	send(m, tocliInboxMsg{inbox: old, payload: tocli.Event{Kind: tocli.EventText, Text: "stale"}})
 	if len(m.tocli.entries) != 0 {
 		t.Fatal("stale event was applied")
 	}
@@ -543,14 +543,14 @@ func TestTranscriptScrollsAndModelTextCannotDrawOnScreen(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	emit(m, tocli.Event{Kind: tocli.EventText, Text: "AWAL\x1b[2J" + strings.Repeat("\nisi", 200), Fresh: true})
+	startPrompt(t, m, h, "first")
+	emit(m, tocli.Event{Kind: tocli.EventText, Text: "START\x1b[2J" + strings.Repeat("\ntext", 200), Fresh: true})
 	h.finish(t, m, nil)
-	expectView(t, m, nil, []string{"AWAL", "\x1b[2J"})
+	expectView(t, m, nil, []string{"START", "\x1b[2J"})
 	for range 40 {
 		send(m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	}
-	expectView(t, m, []string{"AWAL[2J"}, nil)
+	expectView(t, m, []string{"START[2J"}, nil)
 }
 
 func TestSlashMenuFiltersAndCompletes(t *testing.T) {
@@ -605,7 +605,7 @@ func TestSlashExitLeavesWithoutConfirmation(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	h.finish(t, m, nil)
 	typeText(m, "/exit")
 	send(m, enter)
@@ -620,19 +620,19 @@ func TestSlashNewAndClearStartAFreshConversation(t *testing.T) {
 			installFake(t, "claude")
 			m, f, _ := toEditor(t, 0)
 			h := captureTurns(m)
-			startPrompt(t, m, h, "pertama")
-			emit(m, tocli.Event{Kind: tocli.EventSession, Text: "sesi-1"})
+			startPrompt(t, m, h, "first")
+			emit(m, tocli.Event{Kind: tocli.EventSession, Text: "session-1"})
 			h.finish(t, m, nil)
 
 			typeText(m, command)
 			send(m, enter)
-			expectView(t, m, []string{"Tulis prompt"}, []string{"pertama"})
+			expectView(t, m, []string{"Write a prompt"}, []string{"first"})
 			if m.tocli.session != "" || m.screen != screenEditor {
 				t.Fatalf("session %q, screen %d", m.tocli.session, m.screen)
 			}
 			assertNodes(t, f, 1)
 
-			typeText(m, "kedua")
+			typeText(m, "second")
 			send(m, enter)
 			if cmd := h.next(t); slices.Contains(cmd.Args, "--resume") {
 				t.Fatalf("%q", cmd.Args)
@@ -646,11 +646,11 @@ func TestSlashNewWaitsForRunningPrompt(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "sesi-1"})
+	startPrompt(t, m, h, "first")
+	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "session-1"})
 	typeText(m, "/new")
 	send(m, enter)
-	if m.tocli.session != "sesi-1" || len(m.tocli.entries) == 0 || !strings.Contains(m.tocli.status, "Tunggu") {
+	if m.tocli.session != "session-1" || len(m.tocli.entries) == 0 || !strings.Contains(m.tocli.status, "Wait") {
 		t.Fatalf("session %q, status %q", m.tocli.session, m.tocli.status)
 	}
 	h.finish(t, m, nil)
@@ -660,8 +660,8 @@ func TestSlashUsageKeepsSessionAndCreatesNoNode(t *testing.T) {
 	installFake(t, "claude")
 	m, f, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
-	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "sesi-1"})
+	startPrompt(t, m, h, "first")
+	emit(m, tocli.Event{Kind: tocli.EventSession, Text: "session-1"})
 	h.finish(t, m, nil)
 
 	typeText(m, "/usage")
@@ -674,7 +674,7 @@ func TestSlashUsageKeepsSessionAndCreatesNoNode(t *testing.T) {
 		t.Fatal("/usage must be running")
 	}
 	h.finish(t, m, nil)
-	if m.tocli.session != "sesi-1" {
+	if m.tocli.session != "session-1" {
 		t.Fatalf("session %q", m.tocli.session)
 	}
 	assertNodes(t, f, 1)
@@ -684,10 +684,10 @@ func TestSlashUsageWaitsForRunningPrompt(t *testing.T) {
 	installFake(t, "claude")
 	m, _, _ := toEditor(t, 0)
 	h := captureTurns(m)
-	startPrompt(t, m, h, "pertama")
+	startPrompt(t, m, h, "first")
 	typeText(m, "/usage")
 	send(m, enter)
-	if !strings.Contains(m.tocli.status, "Tunggu") {
+	if !strings.Contains(m.tocli.status, "Wait") {
 		t.Fatalf("%q", m.tocli.status)
 	}
 	h.finish(t, m, nil)
@@ -698,9 +698,104 @@ func TestSlashUsageExplainsCodex(t *testing.T) {
 	m, _, _ := toEditor(t, 1)
 	typeText(m, "/usage")
 	send(m, enter)
-	expectView(t, m, []string{"tidak menyediakan sisa kuota"}, nil)
+	expectView(t, m, []string{"does not report remaining quota"}, nil)
 	if m.tocli.running {
 		t.Fatal("codex has nothing to run")
+	}
+}
+
+func TestSlashEffortPicksFromTheListAndReachesTheCLI(t *testing.T) {
+	installFake(t, "claude")
+	m, f, _ := toEditor(t, 0)
+	h := captureTurns(m)
+	typeText(m, "/effort")
+	send(m, enter)
+	if m.screen != screenEffortPick {
+		t.Fatalf("screen %d", m.screen)
+	}
+	expectView(t, m, []string{"> default", "xhigh", "max"}, []string{"ultra"})
+	send(m, down)
+	send(m, down)
+	send(m, enter)
+	if m.screen != screenEditor || m.tocli.effort != "medium" {
+		t.Fatalf("screen %d, effort %q", m.screen, m.tocli.effort)
+	}
+	expectView(t, m, []string{"effort medium"}, nil)
+	assertNodes(t, f, 0)
+
+	cmd := startPrompt(t, m, h, "first")
+	if index := slices.Index(cmd.Args, "--effort"); index < 0 || cmd.Args[index+1] != "medium" {
+		t.Fatalf("%q", cmd.Args)
+	}
+	h.finish(t, m, nil)
+
+	typeText(m, "/effort")
+	send(m, enter)
+	expectView(t, m, []string{"> medium"}, nil)
+	send(m, escape)
+	if m.screen != screenEditor || m.tocli.effort != "medium" {
+		t.Fatalf("screen %d, effort %q", m.screen, m.tocli.effort)
+	}
+}
+
+func TestSlashEffortTakesALevelDirectly(t *testing.T) {
+	installFake(t, "claude")
+	m, f, _ := toEditor(t, 0)
+	h := captureTurns(m)
+	typeText(m, "/effort HIGH")
+	send(m, enter)
+	if m.tocli.effort != "high" || m.tocli.editor.value() != "" {
+		t.Fatalf("effort %q, editor %q", m.tocli.effort, m.tocli.editor.value())
+	}
+	typeText(m, "/effort ultra")
+	send(m, enter)
+	if m.tocli.effort != "high" || !m.tocli.statusErr || m.tocli.editor.value() != "/effort ultra" {
+		t.Fatalf("effort %q, status %q, editor %q", m.tocli.effort, m.tocli.status, m.tocli.editor.value())
+	}
+	m.tocli.editor.reset()
+	typeText(m, "/effort default")
+	send(m, enter)
+	if m.tocli.effort != "" {
+		t.Fatalf("effort %q", m.tocli.effort)
+	}
+	cmd := startPrompt(t, m, h, "first")
+	if slices.Contains(cmd.Args, "--effort") {
+		t.Fatalf("%q", cmd.Args)
+	}
+	h.finish(t, m, nil)
+	assertNodes(t, f, 1)
+}
+
+func TestSlashEffortWaitsForRunningPrompt(t *testing.T) {
+	installFake(t, "claude")
+	m, _, _ := toEditor(t, 0)
+	h := captureTurns(m)
+	startPrompt(t, m, h, "first")
+	typeText(m, "/effort high")
+	send(m, enter)
+	if m.tocli.effort != "" || !strings.Contains(m.tocli.status, "Wait") {
+		t.Fatalf("effort %q, status %q", m.tocli.effort, m.tocli.status)
+	}
+	m.tocli.editor.reset()
+	typeText(m, "/effort")
+	send(m, enter)
+	if m.screen != screenEditor {
+		t.Fatalf("screen %d", m.screen)
+	}
+	h.finish(t, m, nil)
+}
+
+func TestSlashEffortDoesNotCarryOverToANewChat(t *testing.T) {
+	installFake(t, "codex")
+	m, _, _ := toEditor(t, 1)
+	typeText(m, "/effort ultra")
+	send(m, enter)
+	if m.tocli.effort != "ultra" {
+		t.Fatalf("effort %q", m.tocli.effort)
+	}
+	m.handleToCLIReady(tocliReadyMsg{exe: m.tocli.exe, dir: m.tocli.dir})
+	if m.tocli.effort != "" {
+		t.Fatalf("effort %q", m.tocli.effort)
 	}
 }
 
@@ -713,8 +808,8 @@ func TestOtherSlashTextStillReachesTheCLI(t *testing.T) {
 		t.Fatalf("%q", cmd.Args)
 	}
 	h.finish(t, m, nil)
-	cmd = startPrompt(t, m, h, "/home/saya/app rapikan")
-	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "/home/saya/app rapikan") {
+	cmd = startPrompt(t, m, h, "/home/me/app tidy")
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "/home/me/app tidy") {
 		t.Fatalf("%q", cmd.Args)
 	}
 	h.finish(t, m, nil)
@@ -737,21 +832,21 @@ func assertNodes(t *testing.T, f *fixture, want int) {
 func TestUnsupportedAttachmentIsWarnedBeforeSending(t *testing.T) {
 	installFake(t, "codex")
 	m, _, _ := toEditor(t, 1)
-	typeText(m, "lihat ")
+	typeText(m, "see ")
 	send(m, tea.PasteMsg{Content: strings.Repeat("x\n", 30)})
 	h := captureTurns(m)
 	send(m, enter)
-	expectView(t, m, []string{"Peringatan", "TIDAK dikirim"}, nil)
+	expectView(t, m, []string{"Warning", "NOT be sent"}, nil)
 	send(m, enter)
 	cmd := h.next(t)
 	prompt := cmd.Args[len(cmd.Args)-1]
-	if strings.Contains(prompt, "[Paste") || !strings.HasPrefix(prompt, "<8memory-context>") || !strings.HasSuffix(prompt, "lihat") {
+	if strings.Contains(prompt, "[Paste") || !strings.HasPrefix(prompt, "<8memory-context>") || !strings.HasSuffix(prompt, "see") {
 		t.Fatalf("%q", cmd.Args)
 	}
 	h.finish(t, m, nil)
 
 	// The warning stops a later prompt too, even though it would skip the preview.
-	typeText(m, "lagi ")
+	typeText(m, "again ")
 	send(m, tea.PasteMsg{Content: strings.Repeat("y\n", 30)})
 	send(m, enter)
 	if m.screen != screenCLIPreview {
@@ -763,7 +858,7 @@ func TestPreviewReportsWhatWasCut(t *testing.T) {
 	m := &Model{}
 	lines := m.cutReport(compose.Result{DroppedRules: []string{"a", "b", "c", "d"}})
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"4 aturan", "dan 1 lainnya"} {
+	for _, want := range []string{"4 rule(s)", "and 1 more"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in %s", want, joined)
 		}
@@ -776,31 +871,31 @@ func TestRulesCrud(t *testing.T) {
 	send(m, down)
 	send(m, down)
 	send(m, enter)
-	expectView(t, m, []string{"Belum ada aturan"}, nil)
+	expectView(t, m, []string{"No rules yet"}, nil)
 
 	send(m, key('a'))
 	for range 3 {
 		send(m, tab)
 	}
-	typeText(m, "Jangan pakai ORM")
+	typeText(m, "Do not use an ORM")
 	send(m, enter)
-	expectView(t, m, []string{"[global] Jangan pakai ORM"}, nil)
+	expectView(t, m, []string{"[global] Do not use an ORM"}, nil)
 
 	send(m, enter)
-	m.rules.inputs[2].SetValue("Jangan pakai ORM apa pun")
+	m.rules.inputs[2].SetValue("Do not use any ORM")
 	send(m, key(0x00)) // no-op key while the scope selector has focus
 	send(m, ctrl('s'))
-	expectView(t, m, []string{"Jangan pakai ORM apa pun"}, nil)
+	expectView(t, m, []string{"Do not use any ORM"}, nil)
 
 	send(m, key('d'))
-	expectView(t, m, []string{"Hapus aturan"}, nil)
+	expectView(t, m, []string{"Delete this rule"}, nil)
 	send(m, key('n'))
 	if len(m.rules.list) != 1 {
 		t.Fatal("deleted without confirmation")
 	}
 	send(m, key('d'))
 	send(m, key('y'))
-	expectView(t, m, []string{"Belum ada aturan"}, nil)
+	expectView(t, m, []string{"No rules yet"}, nil)
 }
 
 func TestRuleFormShowsValidationError(t *testing.T) {
@@ -819,11 +914,11 @@ func TestJourneyAttachmentsCanBeRemoved(t *testing.T) {
 	send(m, enter)
 	node := m.browser.selected().node
 	base := m.attachmentsDir()
-	if _, err := tocli.Save(base, node.ID, []tocli.Attachment{tocli.NewPaste(1, "isi")}); err != nil {
+	if _, err := tocli.Save(base, node.ID, []tocli.Attachment{tocli.NewPaste(1, "text")}); err != nil {
 		t.Fatal(err)
 	}
 	send(m, key('x'))
-	expectView(t, m, []string{"Hapus attachment"}, nil)
+	expectView(t, m, []string{"Delete this node's attachments"}, nil)
 	send(m, key('n'))
 	if !tocli.HasSaved(base, node.ID) {
 		t.Fatal("removed without confirmation")
@@ -834,13 +929,13 @@ func TestJourneyAttachmentsCanBeRemoved(t *testing.T) {
 		t.Fatal("attachments still exist")
 	}
 	send(m, key('x'))
-	expectView(t, m, []string{"tidak punya attachment"}, nil)
+	expectView(t, m, []string{"has no attachments"}, nil)
 }
 
 func TestEditorMarkerIsAtomic(t *testing.T) {
 	e := editor{}
-	e.markers = []string{"[Paste #1 · 5 baris]"}
-	e.insert("ab[Paste #1 · 5 baris]cd")
+	e.markers = []string{"[Paste #1 · 5 lines]"}
+	e.insert("ab[Paste #1 · 5 lines]cd")
 	e.cursor = 2
 	e.right()
 	if e.cursor != 2+len([]rune(e.markers[0])) {
@@ -857,33 +952,33 @@ func TestEditorMarkerIsAtomic(t *testing.T) {
 
 func TestEditorVerticalMovement(t *testing.T) {
 	e := editor{}
-	e.insert("panjang sekali\nab\nlagi panjang")
+	e.insert("very long line\nab\nlonger again")
 	e.up()
-	if e.cursor != len("panjang sekali\nab") {
+	if e.cursor != len("very long line\nab") {
 		t.Fatalf("up clamps to the shorter line: %d", e.cursor)
 	}
 	e.up()
 	e.down()
 	e.down()
-	if e.lineStart(e.cursor) != len("panjang sekali\nab\n") {
+	if e.lineStart(e.cursor) != len("very long line\nab\n") {
 		t.Fatalf("down: %d", e.cursor)
 	}
 	e.home()
 	e.up()
-	if e.cursor != len("panjang sekali\n") {
+	if e.cursor != len("very long line\n") {
 		t.Fatalf("home+up: %d", e.cursor)
 	}
 	e.end()
-	if e.cursor != len("panjang sekali\nab") {
+	if e.cursor != len("very long line\nab") {
 		t.Fatalf("end: %d", e.cursor)
 	}
 }
 
 func TestEditorRenderWrapsAndScrolls(t *testing.T) {
 	e := editor{}
-	e.insert(strings.Repeat("x", 25) + "\n" + "akhir")
+	e.insert(strings.Repeat("x", 25) + "\n" + "end")
 	rows := strings.Split(e.render(10, 2), "\n")
-	if len(rows) != 2 || !strings.HasPrefix(rows[1], "akhir") {
+	if len(rows) != 2 || !strings.HasPrefix(rows[1], "end") {
 		t.Fatalf("%q", rows)
 	}
 }

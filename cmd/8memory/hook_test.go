@@ -44,7 +44,7 @@ func hookPayload(t *testing.T, prompt, cwd string) *bytes.Reader {
 }
 
 func TestHookCreatesNodeInGitBranch(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "proyek")
+	dir := filepath.Join(t.TempDir(), "project")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestHookCreatesNodeInGitBranch(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
 	var out bytes.Buffer
-	if err := runHook(configPath, "claude", hookPayload(t, "\n  Tambah fitur ekspor\nDetail panjang di baris lain", dir), &out); err != nil {
+	if err := runHook(configPath, "claude", hookPayload(t, "\n  Add export feature\nLong detail on another line", dir), &out); err != nil {
 		t.Fatal(err)
 	}
 	nodes := hookNodes(t, configPath)
@@ -64,7 +64,7 @@ func TestHookCreatesNodeInGitBranch(t *testing.T) {
 		t.Fatalf("%+v", nodes)
 	}
 	n := nodes[0]
-	if n.Project != "proyek" || n.Branch != "develop" || n.Title != "Tambah fitur ekspor" || n.Agent != "claude" {
+	if n.Project != "project" || n.Branch != "develop" || n.Title != "Add export feature" || n.Agent != "claude" {
 		t.Fatalf("%+v", n)
 	}
 	if !strings.Contains(out.String(), n.ID) {
@@ -90,7 +90,7 @@ func TestHookCommandNeverBlocksPrompt(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	cmd := exec.Command(binary, "hook", "--config", filepath.Join(dir, "config.json"))
-	cmd.Stdin = strings.NewReader("ini bukan json")
+	cmd.Stdin = strings.NewReader("this is not json")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("hook must exit 0 on bad input: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestHookDoesNotDuplicateToCLINode(t *testing.T) {
 	dir := t.TempDir()
 
 	var first bytes.Buffer
-	if err := runHook(configPath, "claude", hookPayload(t, "prompt pertama", dir), &first); err != nil {
+	if err := runHook(configPath, "claude", hookPayload(t, "first prompt", dir), &first); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(first.String(), nodeID) || len(hookNodes(t, configPath)) != 0 {
@@ -114,11 +114,11 @@ func TestHookDoesNotDuplicateToCLINode(t *testing.T) {
 	}
 
 	var second bytes.Buffer
-	if err := runHook(configPath, "claude", hookPayload(t, "prompt kedua", dir), &second); err != nil {
+	if err := runHook(configPath, "claude", hookPayload(t, "second prompt", dir), &second); err != nil {
 		t.Fatal(err)
 	}
 	nodes := hookNodes(t, configPath)
-	if len(nodes) != 1 || nodes[0].Title != "prompt kedua" || strings.Contains(second.String(), nodeID) {
+	if len(nodes) != 1 || nodes[0].Title != "second prompt" || strings.Contains(second.String(), nodeID) {
 		t.Fatalf("later prompts need their own node: %+v %q", nodes, second.String())
 	}
 }

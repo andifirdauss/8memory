@@ -1,5 +1,5 @@
 // Package refs validates and resolves references to files kept outside
-// memory, such as backup://proyek/2026-11-09/database.sql or s3://bucket/key.
+// memory, such as backup://project/2026-11-09/database.sql or s3://bucket/key.
 // An alias stands for a directory that differs per machine, so a memory stays
 // valid everywhere and the AI never sees the real path.
 package refs

@@ -30,6 +30,7 @@ type Request struct {
 	Attachments []Attachment
 	AttachDir   string
 	Session     string     // the conversation to continue, empty for a new one
+	Effort      string     // one of the provider's Efforts, empty for the CLI's own setting
 	Memory      *MCPServer // connects 8memory's own tools to the CLI
 	Approval    *MCPServer // the permission host, if there is one
 }
@@ -77,6 +78,8 @@ type Provider interface {
 	NewParser() Parser
 	// UsageArgs returns the command that reports usage limits, nil if there is none.
 	UsageArgs() []string
+	// Efforts lists the reasoning effort levels the CLI accepts, lowest first.
+	Efforts() []string
 }
 
 // Providers lists the CLIs offered in the TUI.
@@ -86,7 +89,7 @@ var Providers = []Provider{claudeCode{}, codex{}}
 type NotFoundError struct{ Provider Provider }
 
 func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("CLI %s (%s) tidak ditemukan di PATH. %s", e.Provider.Label(), e.Provider.Binary(), e.Provider.InstallHint())
+	return fmt.Sprintf("%s CLI (%s) not found in PATH. %s", e.Provider.Label(), e.Provider.Binary(), e.Provider.InstallHint())
 }
 
 // Executable is a resolved program and the arguments that must precede any
@@ -131,15 +134,15 @@ func resolveShim(path string) (Executable, error) {
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return Executable{}, fmt.Errorf("baca %s: %w", path, err)
+		return Executable{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	match := npmShimTarget.FindSubmatch(content)
 	if match == nil {
-		return Executable{}, fmt.Errorf("%s adalah skrip batch yang tidak dikenal, dan prompt tidak aman dikirim lewat batch", path)
+		return Executable{}, fmt.Errorf("%s is an unrecognized batch script, and prompts cannot be sent safely through batch", path)
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
-		return Executable{}, errors.New("node tidak ditemukan, padahal CLI ini dipasang lewat npm")
+		return Executable{}, errors.New("node not found, although this CLI was installed through npm")
 	}
 	script := filepath.Join(filepath.Dir(path), filepath.FromSlash(strings.ReplaceAll(string(match[1]), `\`, "/")))
 	return Executable{Path: node, Prefix: []string{script}}, nil
@@ -152,7 +155,7 @@ func Warnings(p Provider, attachments []Attachment) []string {
 	for _, a := range attachments {
 		switch {
 		case !p.Supports(a):
-			out = append(out, fmt.Sprintf("%s: %s belum punya cara resmi menerima %s, jadi attachment ini TIDAK dikirim.", a.Marker, p.Label(), a.Kind))
+			out = append(out, fmt.Sprintf("%s: %s has no official way to receive %s yet, so this attachment will NOT be sent.", a.Marker, p.Label(), a.Kind))
 		case p.Note(a) != "":
 			out = append(out, a.Marker+": "+p.Note(a))
 		}
@@ -169,7 +172,7 @@ func Build(ctx context.Context, p Provider, exe Executable, dir, nodeID string, 
 		total += len(arg) + 1
 	}
 	if total > maxCommandLine {
-		return nil, fmt.Errorf("prompt terlalu panjang untuk baris perintah (%d karakter). Tempel teks panjang sebagai attachment", total)
+		return nil, fmt.Errorf("prompt is too long for the command line (%d characters). Paste long text as an attachment", total)
 	}
 	cmd := exec.CommandContext(ctx, exe.Path, args...)
 	cmd.Dir = dir
@@ -207,7 +210,7 @@ func (claudeCode) ID() string     { return "claude" }
 func (claudeCode) Label() string  { return "Claude Code" }
 func (claudeCode) Binary() string { return "claude" }
 func (claudeCode) InstallHint() string {
-	return "Pasang dari https://code.claude.com/docs/en/setup atau tambahkan foldernya ke PATH."
+	return "Install from https://code.claude.com/docs/en/setup or add its folder to PATH."
 }
 
 // The native installer puts the binary here without always updating PATH.
@@ -221,7 +224,7 @@ const claudeMentionLimit = 256 * 1024
 
 func (claudeCode) Note(a Attachment) string {
 	if a.Kind != KindImage && a.Size > claudeMentionLimit {
-		return "lebih dari 256 KB, jadi Claude Code tidak memasukkannya otomatis dan harus membacanya sendiri."
+		return "over 256 KB, so Claude Code will not include it automatically and must read it itself."
 	}
 	return ""
 }
@@ -235,6 +238,8 @@ func (claudeCode) NewParser() Parser { return &claudeParser{} }
 func (claudeCode) UsageArgs() []string {
 	return []string{"-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--", "/usage"}
 }
+
+func (claudeCode) Efforts() []string { return []string{"low", "medium", "high", "xhigh", "max"} }
 
 // Args uses @path for text and a plain path for images, the two forms Claude
 // Code documents. "--" keeps the prompt from being read as a value of the
@@ -261,6 +266,9 @@ func (c claudeCode) Args(r Request) []string {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"}
 	if r.Session != "" {
 		args = append(args, "--resume", r.Session)
+	}
+	if r.Effort != "" {
+		args = append(args, "--effort", r.Effort)
 	}
 	servers := map[string]*MCPServer{}
 	if r.Memory != nil {
@@ -289,7 +297,7 @@ func (codex) ID() string     { return "codex" }
 func (codex) Label() string  { return "Codex" }
 func (codex) Binary() string { return "codex" }
 func (codex) InstallHint() string {
-	return "Pasang dengan: npm install -g @openai/codex"
+	return "Install with: npm install -g @openai/codex"
 }
 func (codex) FallbackDirs(string) []string { return nil }
 
@@ -303,6 +311,12 @@ func (codex) AsksApproval() bool { return false }
 func (codex) NewParser() Parser { return &codexParser{} }
 
 func (codex) UsageArgs() []string { return nil }
+
+// Efforts follows Codex's config reference. Which levels work depends on the
+// model, and Codex itself reports a level the model does not have.
+func (codex) Efforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max", "ultra"}
+}
 
 // Args sets the sandbox through -c because "exec resume" has no --sandbox
 // flag. "--" ends --image, which takes several values and would otherwise
@@ -318,6 +332,9 @@ func (c codex) Args(r Request) []string {
 		args = append(args, "resume")
 	}
 	args = append(args, "--json", "--skip-git-repo-check", "-c", `sandbox_mode="workspace-write"`)
+	if r.Effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+marshal(r.Effort))
+	}
 	if r.Memory != nil {
 		// A JSON string or list of strings is also valid TOML.
 		args = append(args,

@@ -130,7 +130,7 @@ func (p *claudeParser) Parse(raw []byte) []Event {
 		case "init":
 			return []Event{{Kind: EventSession, Text: line.SessionID}}
 		case "api_retry":
-			return []Event{{Kind: EventInfo, Text: fmt.Sprintf("Mencoba lagi (%d/%d): %s", line.Attempt, line.MaxRetries, line.Error)}}
+			return []Event{{Kind: EventInfo, Text: fmt.Sprintf("Retrying (%d/%d): %s", line.Attempt, line.MaxRetries, line.Error)}}
 		}
 	case "stream_event":
 		return p.parseStream(line)
@@ -201,7 +201,7 @@ func (p *claudeParser) parseResult(line claudeLine) []Event {
 		for _, denial := range line.PermissionDenials {
 			names = append(names, denial.ToolName)
 		}
-		out = append(out, Event{Kind: EventInfo, Text: fmt.Sprintf("%d tindakan ditolak: %s", len(names), strings.Join(names, ", "))})
+		out = append(out, Event{Kind: EventInfo, Text: fmt.Sprintf("Actions denied (%d): %s", len(names), strings.Join(names, ", "))})
 	}
 	switch {
 	case line.IsError:
@@ -266,7 +266,7 @@ func (codexParser) Parse(raw []byte) []Event {
 		}
 	case "item.started":
 		if line.Item != nil && line.Item.Type == "command_execution" {
-			return []Event{{Kind: EventTool, Text: "Perintah: " + oneLine(line.Item.Command, toolSummaryRunes)}}
+			return []Event{{Kind: EventTool, Text: "Command: " + oneLine(line.Item.Command, toolSummaryRunes)}}
 		}
 	case "item.completed":
 		if line.Item != nil {
@@ -287,7 +287,7 @@ func codexCompleted(item codexItem) []Event {
 		}
 		return out
 	case "web_search":
-		return []Event{{Kind: EventTool, Text: "Pencarian: " + oneLine(item.Query, toolSummaryRunes)}}
+		return []Event{{Kind: EventTool, Text: "Search: " + oneLine(item.Query, toolSummaryRunes)}}
 	case "mcp_tool_call":
 		return []Event{{Kind: EventTool, Text: "MCP: " + item.Server + "/" + item.Tool}}
 	case "error":

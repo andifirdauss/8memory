@@ -43,24 +43,24 @@ func build(t *testing.T, s store.Store, node string) Result {
 
 func TestIncludesOnlyApplicableRulesInOrder(t *testing.T) {
 	s := open(t)
-	addRule(t, s, store.ScopeGlobal, "", "", "Jawab dalam bahasa Indonesia")
-	addRule(t, s, store.ScopeProject, "demo", "", "Jangan ubah folder vendor")
-	addRule(t, s, store.ScopeBranch, "demo", "main", "Main hanya menerima hotfix")
-	addRule(t, s, store.ScopeBranch, "demo", "lain", "Aturan branch lain")
-	addRule(t, s, store.ScopeProject, "proyek-lain", "", "Aturan proyek lain")
+	addRule(t, s, store.ScopeGlobal, "", "", "Answer in English")
+	addRule(t, s, store.ScopeProject, "demo", "", "Do not change the vendor folder")
+	addRule(t, s, store.ScopeBranch, "demo", "main", "Main only accepts hotfixes")
+	addRule(t, s, store.ScopeBranch, "demo", "other", "Other branch rule")
+	addRule(t, s, store.ScopeProject, "other-project", "", "Other project rule")
 
 	result := build(t, s, testNode)
-	for _, want := range []string{testNode, "Jawab dalam bahasa Indonesia", "Jangan ubah folder vendor", "Main hanya menerima hotfix"} {
+	for _, want := range []string{testNode, "Answer in English", "Do not change the vendor folder", "Main only accepts hotfixes"} {
 		if !strings.Contains(result.Text, want) {
 			t.Errorf("missing %q in:\n%s", want, result.Text)
 		}
 	}
-	for _, absent := range []string{"Aturan branch lain", "Aturan proyek lain"} {
+	for _, absent := range []string{"Other branch rule", "Other project rule"} {
 		if strings.Contains(result.Text, absent) {
 			t.Errorf("should not include %q:\n%s", absent, result.Text)
 		}
 	}
-	if strings.Index(result.Text, "Main hanya") > strings.Index(result.Text, "Jawab dalam") {
+	if strings.Index(result.Text, "Main only") > strings.Index(result.Text, "Answer in") {
 		t.Errorf("branch rule must come before global:\n%s", result.Text)
 	}
 	if len(result.DroppedRules) != 0 || result.RulesIncluded != 3 {
@@ -79,17 +79,17 @@ func TestToldToSearchMemoryItself(t *testing.T) {
 
 func TestStoredMemoriesAreNotCopiedIn(t *testing.T) {
 	s := open(t)
-	if _, err := s.Write(context.Background(), store.Memory{Project: "demo", Branch: "main", Change: store.ChangeAdd, Feature: "Login", Content: "ISI-MEMORI"}); err != nil {
+	if _, err := s.Write(context.Background(), store.Memory{Project: "demo", Branch: "main", Change: store.ChangeAdd, Feature: "Login", Content: "MEMORY-CONTENT"}); err != nil {
 		t.Fatal(err)
 	}
-	if result := build(t, s, testNode); strings.Contains(result.Text, "ISI-MEMORI") {
+	if result := build(t, s, testNode); strings.Contains(result.Text, "MEMORY-CONTENT") {
 		t.Fatal(result.Text)
 	}
 }
 
 func TestSystemPartStaysTheSameBetweenPrompts(t *testing.T) {
 	s := open(t)
-	addRule(t, s, store.ScopeGlobal, "", "", "Satu aturan")
+	addRule(t, s, store.ScopeGlobal, "", "", "One rule")
 	first, second := build(t, s, testNode), build(t, s, "0195f3a2-7c10-7000-8000-000000000002")
 	if first.System != second.System {
 		t.Fatal("a changing system prompt would invalidate the prompt cache")

@@ -1,22 +1,22 @@
 # 8memory
 
-Memori dan journey bersama untuk AI coding tool. Claude Code, Codex, Cursor, dan Antigravity menulis dan membaca data yang sama lewat MCP, sehingga konteks proyek tersimpan di luar AI.
+Shared memory and journey for AI coding tools. Claude Code, Codex, Cursor and Antigravity write and read the same data through MCP, so project context lives outside the AI.
 
-| | Journey | Memori |
+| | Journey | Memory |
 | --- | --- | --- |
-| Isi | Tanggal, waktu, judul | Fitur apa yang ditambah, dikurangi, diubah, atau hanya diperiksa |
-| Jumlah | Satu node UUID per prompt | Satu catatan per fitur, tertaut ke node |
-| Dipakai untuk | Linimasa murah token: 1 hari, 7 hari, 1 bulan | Detail keputusan saat dibutuhkan |
+| Holds | Date, time, title | Which features were added, removed, modified or only inspected |
+| Count | One UUID node per prompt | One record per feature, linked to a node |
+| Used for | A token-cheap timeline: 1 day, 7 days, 1 month | Decision details when needed |
 
-Proyek dan branch dideteksi otomatis dari git. Memori dan journey terpisah per branch, dan branch lain tetap bisa dibaca dengan `branch: "*"`.
+Project and branch are detected from git automatically. Memory and journey are separated per branch, and other branches stay readable with `branch: "*"`.
 
-## Pasang
+## Install
 
 ```sh
 npm install -g 8memory
 ```
 
-Butuh Node.js 18 ke atas. Setelah itu cukup ketik `8memory` dari folder mana pun. Binary tersedia untuk Windows x64, Linux x64/arm64, dan macOS x64/arm64.
+Requires Node.js 18 or later. After that, just type `8memory` from any folder. Binaries are available for Windows x64, Linux x64/arm64 and macOS x64/arm64.
 
 ## Build
 
@@ -30,168 +30,169 @@ go build -trimpath -ldflags "-s -w" -o 8memory.exe ./cmd/8memory
 8memory
 ```
 
-Di PowerShell, dari folder program, ketik `.\8memory`. Supaya bisa dipanggil dari mana saja, tambahkan foldernya ke `PATH`.
+In PowerShell, from the program folder, type `.\8memory`. To call it from anywhere, add its folder to `PATH`.
 
-- **Journey:** linimasa prompt per 1 hari, 7 hari, 1 bulan, atau semua (`p`). Dikelompokkan menurut proyek/branch, proyek, branch, hari, atau agent (`g`). Enter membuka memori milik node itu, dan `x` menghapus attachment node itu.
-- **Memory:** filter periode (`p`), grup (`g`), jenis perubahan (`c`), dan pencarian (`/`). Enter membuka isi lengkap.
-- **Rules:** lihat, tambah, ubah, dan hapus aturan yang berlaku global, per proyek, atau per branch.
-- **Chat:** bicara dengan AI dari sini, dengan CLI asli provider bekerja di belakang layar. Lihat [Chat](#chat).
-- **Storage:** ganti backend dan salin data yang sudah ada. Penyalinan aman diulang. Restart AI client setelah mengganti backend.
+- **Journey:** a prompt timeline for 1 day, 7 days, 1 month or all (`p`). Grouped by project/branch, project, branch, day or agent (`g`). Enter opens that node's memories, and `x` deletes that node's attachments.
+- **Memory:** filter by period (`p`), group (`g`), change type (`c`) and search (`/`). Enter opens the full content.
+- **Rules:** view, add, edit and delete rules that apply globally, per project or per branch.
+- **Chat:** talk to the AI from here, with the provider's real CLI working behind the scenes. See [Chat](#chat).
+- **Storage:** switch backends and copy existing data. Copying is safe to repeat. Restart AI clients after switching backends.
 
-| Backend | Pencarian memori |
+| Backend | Memory search |
 | --- | --- |
-| SQLite (default, `~/.8memory/memory.db`) | FTS5, diurutkan menurut relevansi |
-| PostgreSQL | `tsvector` + GIN, diurutkan menurut relevansi |
-| SQL Server | `LIKE`, terbaru dulu, memindai seluruh tabel |
-| Oracle | `LIKE`, terbaru dulu, memindai seluruh tabel |
+| SQLite (default, `~/.8memory/memory.db`) | FTS5, ordered by relevance |
+| PostgreSQL | `tsvector` + GIN, ordered by relevance |
+| SQL Server | `LIKE`, newest first, scans the whole table |
+| Oracle | `LIKE`, newest first, scans the whole table |
 
-Pengaturan disimpan di `~/.8memory/config.json`. Password tersimpan sebagai teks biasa di file itu, jadi jaga akses ke folder tersebut.
+Settings are stored in `~/.8memory/config.json`. Passwords are stored as plain text in that file, so protect access to the folder.
 
-## Mendaftarkan ke AI client
+## Registering with an AI client
 
 Claude Code:
 
 ```sh
-claude mcp add --scope user 8memory -- "D:\path\ke\8memory.exe" serve
+claude mcp add --scope user 8memory -- "D:\path\to\8memory.exe" serve
 ```
 
 Codex (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.8memory]
-command = 'D:\path\ke\8memory.exe'
+command = 'D:\path\to\8memory.exe'
 args = ["serve"]
 ```
 
-Cursor dan Antigravity (file konfigurasi MCP masing-masing):
+Cursor and Antigravity (their respective MCP configuration files):
 
 ```json
 {
   "mcpServers": {
-    "8memory": { "command": "D:\\path\\ke\\8memory.exe", "args": ["serve"] }
+    "8memory": { "command": "D:\\path\\to\\8memory.exe", "args": ["serve"] }
   }
 }
 ```
 
-### Node otomatis di Claude Code
+### Automatic nodes in Claude Code
 
-Tambahkan hook ini ke `~/.claude/settings.json` supaya setiap prompt pasti menjadi node, tanpa bergantung pada model dan tanpa memakai token. Judulnya diambil dari baris pertama prompt.
+Add this hook to `~/.claude/settings.json` so every prompt is guaranteed to become a node, without relying on the model and without using tokens. The title is taken from the first line of the prompt.
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "\"D:\\path\\ke\\8memory.exe\" hook --agent claude" }] }
+      { "hooks": [{ "type": "command", "command": "\"D:\\path\\to\\8memory.exe\" hook --agent claude" }] }
     ]
   }
 }
 ```
 
-Di client tanpa hook, model membuat node sendiri dengan `journey_mark` sesuai instruksi server.
+In clients without hooks, the model creates the node itself with `journey_mark`, following the server instructions.
 
-### Instruksi untuk AI
+### Instructions for the AI
 
-Tambahkan ini ke `CLAUDE.md` atau `AGENTS.md`:
+Add this to `CLAUDE.md` or `AGENTS.md`:
 
 ```md
-Di awal sesi, panggil journey_list dan memory_search dengan cwd proyek ini.
-Setelah prompt selesai, panggil memory_write sekali per fitur, dengan change add, remove, modify, atau inspect, dan node_id prompt ini. Isi tags dengan sinonim Indonesia dan Inggris.
+At the start of a session, call journey_list and memory_search with this project's cwd.
+When the prompt is finished, call memory_write once per feature, with change set to add, remove, modify or inspect, and the node_id of this prompt. Fill tags with Indonesian and English synonyms.
 ```
 
 ## Chat
 
-Chat adalah layar percakapan di dalam TUI. Setiap prompt diketik di 8memory, diperkaya dengan aturan dan memori, lalu dijalankan oleh CLI asli provider di belakang layar. Jawabannya tampil di TUI, dan percakapannya berlanjut dari prompt ke prompt.
+Chat is a conversation screen inside the TUI. Each prompt is typed in 8memory, enriched with rules and memory, then run by the provider's real CLI behind the scenes. The answer appears in the TUI, and the conversation continues from prompt to prompt.
 
-1. Buka menu **Chat**. Tekan enter di baris Provider untuk memilih dari daftar, lalu isi folder proyek. Proyek dan branch dideteksi dari folder itu.
-2. Tulis prompt. Tambahkan attachment kalau perlu.
-3. Tekan enter. Prompt langsung terkirim. Layar konfirmasi hanya muncul kalau ada attachment yang tidak bisa dikirim.
-4. Setiap prompt otomatis mendapat node journey sendiri dan ringkasan. Kalau ada aturan yang terpotong dari batas 2 KB, TUI memberi tahu.
+1. Open the **Chat** menu. Press enter on the Provider row to choose from the list, then fill in the project folder. Project and branch are detected from that folder.
+2. Write a prompt. Add attachments if needed.
+3. Press enter. The prompt is sent right away. A confirmation screen appears only when an attachment cannot be sent.
+4. Every prompt automatically gets its own journey node and briefing. If any rule is cut off by the 2 KB limit, the TUI tells you.
 
-Ringkasan dibatasi 2 KB dan berisi aturan yang berlaku serta catatan bahwa proyek ini punya memori 8memory. Aturan tidak pernah dipendekkan, urutannya branch, proyek, lalu global.
+The briefing is limited to 2 KB and holds the rules that apply plus a note that this project has 8memory memory. Rules are never shortened, and their order is branch, project, then global.
 
-Isi memori tidak disalin ke ringkasan. AI sendiri yang mencarinya dengan `memory_search` saat perlu dan menulis hasil kerjanya dengan `memory_write`. Chat menyambungkan tool 8memory ke CLI secara otomatis di setiap prompt, jadi `claude mcp add` tidak diperlukan untuk Chat, dan tool itu berjalan tanpa dialog izin. Ringkasan meminta AI memperlakukan hasil pencarian sebagai data, bukan instruksi. Judul node diambil dari teks yang diketik.
+Memory content is not copied into the briefing. The AI searches for it with `memory_search` when needed and writes its results with `memory_write`. Chat connects the 8memory tools to the CLI automatically on every prompt, so `claude mcp add` is not needed for Chat, and those tools run without a permission dialog. The briefing asks the AI to treat search results as data, not instructions. The node title is taken from the typed text.
 
-| Provider | Dijalankan dengan | Ringkasan | Teks tempelan dan file | Gambar |
+| Provider | Run with | Briefing | Pasted text and files | Images |
 | --- | --- | --- | --- | --- |
-| Claude Code | `claude -p --resume` | catatan dan aturan di `--append-system-prompt`, ID node di awal prompt | referensi `@path` | path gambar di dalam prompt |
-| Codex | `codex exec resume --json` | di awal prompt | tidak didukung, muncul peringatan dan tidak dikirim | `--image` |
+| Claude Code | `claude -p --resume` | note and rules in `--append-system-prompt`, node ID at the start of the prompt | `@path` references | image path inside the prompt |
+| Codex | `codex exec resume --json` | at the start of the prompt | not supported, shows a warning and is not sent | `--image` |
 
-Di Claude Code, ID node ditaruh di awal pesan, bukan di system prompt. System prompt yang berubah di setiap prompt akan membatalkan cache seluruh percakapan dan memboroskan kuota.
+In Claude Code, the node ID is placed at the start of the message, not in the system prompt. A system prompt that changes on every prompt would invalidate the cache of the whole conversation and waste quota.
 
-### Izin tool
+### Tool permissions
 
-Claude Code berjalan dalam auto mode. Tindakan yang masih butuh izin muncul sebagai dialog di TUI, dengan seluruh isi tool call. **Ctrl+Y** mengizinkan dan **Esc** menolak. Mengizinkan sengaja tidak memakai `y`, karena dialog bisa terbuka saat kamu sedang mengetik prompt berikutnya. Dialog ini dilayani server MCP yang hanya mendengarkan `127.0.0.1` selama sesi, dengan token acak.
+Claude Code runs in auto mode. Actions that still need permission appear as a dialog in the TUI, with the full content of the tool call. **Ctrl+Y** allows and **Esc** denies. Allowing deliberately does not use `y`, because the dialog can open while you are typing the next prompt. The dialog is served by an MCP server that listens only on `127.0.0.1` during the session, with a random token.
 
-`permissions.deny`, `ask`, dan hook di setting Claude Code tetap berlaku.
+`permissions.deny`, `ask` and hooks in Claude Code settings still apply.
 
-Codex tidak punya dialog izin dalam mode ini. Codex berjalan di sandbox `workspace-write`, jadi hanya bisa menulis di folder proyek.
+Codex has no permission dialog in this mode. Codex runs in the `workspace-write` sandbox, so it can only write inside the project folder.
 
-CLI dicari di `PATH`, lalu di `~/.local/bin` untuk Claude Code. Provider baru ditambahkan dengan mengimplementasikan interface `Provider` di `internal/tocli/provider.go`.
+The CLI is looked up in `PATH`, then in `~/.local/bin` for Claude Code. New providers are added by implementing the `Provider` interface in `internal/tocli/provider.go`.
 
-### Perintah
+### Commands
 
-Ketik `/` di awal prompt untuk membuka menu. ↑/↓ memilih, Tab melengkapi, Enter menjalankan, dan Esc menutup menu.
+Type `/` at the start of a prompt to open the menu. ↑/↓ selects, Tab completes, Enter runs and Esc closes the menu.
 
-| Perintah | Fungsi |
+| Command | Purpose |
 | --- | --- |
-| `/help` | Daftar perintah dan tombol |
-| `/new`, `/clear` | Membersihkan layar dan memulai percakapan baru di folder yang sama. Percakapan lama tetap tersimpan di CLI provider |
-| `/usage` | Sisa kuota provider, tanpa memakai kuota. Codex tidak menyediakannya di mode ini |
-| `/exit` | Mengakhiri sesi |
+| `/help` | List commands and keys |
+| `/new`, `/clear` | Clear the screen and start a new conversation in the same folder. The old conversation stays saved in the provider's CLI |
+| `/effort` | Open the list of effort levels for this chat session. `/effort high` selects directly, and `/effort default` returns to the CLI setting. The levels available in Codex depend on its model |
+| `/usage` | Remaining provider quota, without using any. Codex does not offer this in this mode |
+| `/exit` | End the session |
 
-Teks lain yang diawali `/` diteruskan ke CLI provider sebagai prompt biasa, termasuk node journey dan ringkasannya.
+Other text starting with `/` is passed to the provider's CLI as a normal prompt, including its journey node and briefing.
 
-### Tombol editor
+### Editor keys
 
-| Tombol | Fungsi |
+| Key | Purpose |
 | --- | --- |
-| Enter | Kirim prompt |
-| Shift+Enter, Ctrl+J | Baris baru |
-| Alt+Enter | Baris baru, tetapi Windows Terminal memakainya untuk fullscreen secara default |
-| Alt+V | Tempel gambar dari clipboard |
-| Ctrl+O | Tambah file dari path |
-| Ctrl+E | Daftar attachment: enter untuk pratinjau, `d` untuk hapus |
-| Backspace, Delete | Menghapus penanda attachment sebagai satu kesatuan |
-| PgUp, PgDn | Menggulir percakapan |
-| Esc, Ctrl+C | Menghentikan prompt yang sedang berjalan |
-| Esc dua kali | Mengakhiri sesi saat tidak ada prompt berjalan |
+| Enter | Send the prompt |
+| Shift+Enter, Ctrl+J | New line |
+| Alt+Enter | New line, but Windows Terminal uses it for fullscreen by default |
+| Alt+V | Paste an image from the clipboard |
+| Ctrl+O | Add a file from a path |
+| Ctrl+E | List attachments: enter to preview, `d` to delete |
+| Backspace, Delete | Delete an attachment marker as one unit |
+| PgUp, PgDn | Scroll the conversation |
+| Esc, Ctrl+C | Stop the running prompt |
+| Esc twice | End the session when no prompt is running |
 
-Ctrl+V di Windows Terminal hanya menempel teks, karena terminal tidak mengirim gambar lewat paste. Karena itu gambar memakai Alt+V, yang membaca clipboard lewat PowerShell di Windows, `osascript` di macOS, serta `wl-paste` atau `xclip` di Linux.
+Ctrl+V in Windows Terminal pastes only text, because the terminal does not send images through paste. That is why images use Alt+V, which reads the clipboard through PowerShell on Windows, `osascript` on macOS, and `wl-paste` or `xclip` on Linux.
 
-### Attachment
+### Attachments
 
-Teks tempelan sepanjang 20 baris atau 2 KB ke atas otomatis menjadi attachment, dan di editor hanya tampil penanda seperti `[Paste #1 · 120 baris]`. Ambangnya diatur di `~/.8memory/config.json`:
+Pasted text of 20 lines or 2 KB and up automatically becomes an attachment, and the editor shows only a marker such as `[Paste #1 · 120 lines]`. The thresholds are set in `~/.8memory/config.json`:
 
 ```json
 { "paste_lines": 40, "paste_bytes": 4096 }
 ```
 
-Attachment disimpan di `~/.8memory/attachments/<uuid node>/`, bukan di folder proyek. Isinya tidak dihitung dalam batas 2 KB dan tidak masuk ke memori. Untuk menghapusnya, tekan `x` pada node di layar Journey, atau hapus folder itu.
+Attachments are stored in `~/.8memory/attachments/<node uuid>/`, not in the project folder. Their content does not count toward the 2 KB limit and does not go into memory. To delete them, press `x` on the node in the Journey screen, or delete that folder.
 
-### Batasan
+### Limitations
 
-- Chat hanya memperkuat kepatuhan AI, tidak menjaminnya. Aturan tetap berupa teks yang bisa diabaikan model.
-- Larangan yang wajib tetap perlu `permissions.deny` atau hook. Lihat [Memblokir akses AI ke folder backup](#memblokir-akses-ai-ke-folder-backup).
-- Hanya prompt yang diketik di layar Chat yang mendapat ringkasan. Prompt yang diketik langsung di CLI provider tidak lewat Chat.
-- Tampilan jawaban buatan 8memory, bukan UI asli CLI. Perintah khusus terminal seperti `/login` tidak tersedia, dan login tetap dilakukan di CLI provider.
-- Sesi non-interaktif tidak menampilkan dialog kepercayaan folder, jadi hook dan server MCP milik proyek ikut berjalan. Pilih hanya folder yang kamu percaya.
-- `claude -p` memakai batas langganan yang sama dengan Claude Code biasa selama kamu login dengan paket Claude, sesuai [ketentuan Anthropic](https://support.claude.com/en/articles/15036540).
-- Kalau hook `UserPromptSubmit` aktif, node dari Chat dipakai dan prompt tidak tercatat dua kali.
-- Isi percakapan hanya ada di layar selama sesi. Yang tersimpan di 8memory hanya node journey dan memori yang ditulis AI.
+- Chat only strengthens AI compliance, it does not guarantee it. Rules are still text that the model can ignore.
+- Prohibitions that must hold still need `permissions.deny` or hooks. See [Blocking AI access to the backup folder](#blocking-ai-access-to-the-backup-folder).
+- Only prompts typed in the Chat screen get a briefing. Prompts typed directly in the provider's CLI do not go through Chat.
+- The answer view is built by 8memory, not the CLI's own UI. Terminal-only commands such as `/login` are not available, and logging in still happens in the provider's CLI.
+- Non-interactive sessions do not show the folder trust dialog, so the project's hooks and MCP servers also run. Choose only folders you trust.
+- `claude -p` uses the same subscription limits as regular Claude Code as long as you are logged in with a Claude plan, according to [Anthropic's terms](https://support.claude.com/en/articles/15036540).
+- If the `UserPromptSubmit` hook is active, the node from Chat is used and the prompt is not recorded twice.
+- Conversation content exists only on screen during the session. All that is kept in 8memory is the journey nodes and the memories the AI writes.
 
-Perilaku editor diadaptasi dari [oh my pi](https://github.com/can1357/oh-my-pi). Kodenya ditulis sendiri untuk proyek ini.
+Editor behavior is adapted from [oh my pi](https://github.com/can1357/oh-my-pi). The code was written from scratch for this project.
 
-## File besar
+## Large files
 
-`memory_write` menolak `content` di atas 16 KB dan teks yang jelas berupa dump, misalnya berisi `-- PostgreSQL database dump` atau 100 lebih `INSERT INTO`. File seperti itu disimpan di luar proyek, lalu memori hanya menyimpan ringkasan dan referensinya lewat parameter `files`:
+`memory_write` rejects `content` over 16 KB and text that is clearly a dump, for example containing `-- PostgreSQL database dump` or 100 or more `INSERT INTO`. Such files are stored outside the project, and memory keeps only a summary and a reference through the `files` parameter:
 
 ```json
 {
   "change": "inspect",
-  "feature": "Backup database",
-  "content": "Backup penuh sebelum migrasi skema",
+  "feature": "Database backup",
+  "content": "Full backup before the schema migration",
   "files": [{
-    "ref": "backup://namaproyek/2026-11-09/database.sql",
+    "ref": "backup://myproject/2026-11-09/database.sql",
     "size": 5368709120,
     "kind": "postgres-dump",
     "restore_hint": "psql -d app -f database.sql"
@@ -199,9 +200,9 @@ Perilaku editor diadaptasi dari [oh my pi](https://github.com/can1357/oh-my-pi).
 }
 ```
 
-`ref` memakai alias atau langsung `s3://bucket/key`. Path lokal, `..`, dan alias yang belum terdaftar ditolak. `host` terisi otomatis dengan nama mesin penulis kalau dikosongkan.
+`ref` uses an alias or directly `s3://bucket/key`. Local paths, `..` and unregistered aliases are rejected. `host` is filled in automatically with the writing machine's name when left empty.
 
-Alias diatur per mesin di `~/.8memory/config.json`, sehingga referensi yang sama berlaku di semua mesin dan AI tidak melihat path aslinya:
+Aliases are set per machine in `~/.8memory/config.json`, so the same reference works on every machine and the AI does not see the real path:
 
 ```json
 { "aliases": { "backup": "D:\\Backup" } }
@@ -211,11 +212,11 @@ Alias diatur per mesin di `~/.8memory/config.json`, sehingga referensi yang sama
 { "aliases": { "backup": "/srv/backup" } }
 ```
 
-Layar detail memori di TUI menampilkan lokasi file di mesin ini. Dari terminal, pakai `8memory resolve backup://namaproyek/2026-11-09/database.sql`.
+The memory detail screen in the TUI shows the file's location on this machine. From a terminal, use `8memory resolve backup://myproject/2026-11-09/database.sql`.
 
-### Memblokir akses AI ke folder backup
+### Blocking AI access to the backup folder
 
-8memory hanya mengontrol apa yang masuk ke memori, bukan apa yang bisa dibaca AI. Pemblokiran dilakukan di client. Di Claude Code, tambahkan ke `~/.claude/settings.json`:
+8memory only controls what goes into memory, not what the AI can read. Blocking happens in the client. In Claude Code, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -225,9 +226,9 @@ Layar detail memori di TUI menampilkan lokasi file di mesin ini. Dari terminal, 
 }
 ```
 
-Claude Code mengubah path Windows ke bentuk POSIX sebelum mencocokkan, jadi `D:\Backup` ditulis `//d/Backup`. Bentuk `Read(D:/Backup/**)` dibaca sebagai path relatif dan tidak melindungi folder itu. Di Linux, tulis `Read(//srv/backup/**)`.
+Claude Code converts Windows paths to POSIX form before matching, so `D:\Backup` is written `//d/Backup`. The form `Read(D:/Backup/**)` is read as a relative path and does not protect that folder. On Linux, write `Read(//srv/backup/**)`.
 
-Aturan `Read` berlaku untuk tool bawaan yang membaca file dan perintah Bash yang dikenali seperti `cat`, `head`, dan `sed`. Aturan ini tidak berlaku untuk perintah yang membaca file tanpa menyebut namanya, misalnya `grep -r` dari dalam folder itu, atau skrip Python dan Node yang membuka file sendiri. Untuk mempersempit celah itu, tambahkan hook `PreToolUse` yang opsional. Hook ini berjalan di Git Bash, dan menolak setiap panggilan tool yang menyebut folder backup:
+`Read` rules apply to built-in tools that read files and to recognized Bash commands such as `cat`, `head` and `sed`. They do not apply to commands that read files without naming them, for example `grep -r` from inside that folder, or Python and Node scripts that open files themselves. To narrow that gap, add the optional `PreToolUse` hook. This hook runs in Git Bash and rejects any tool call that mentions the backup folder:
 
 ```json
 {
@@ -237,7 +238,7 @@ Aturan `Read` berlaku untuk tool bawaan yang membaca file dan perintah Bash yang
         "matcher": "Bash|Read|Edit|Write|Grep|Glob",
         "hooks": [{
           "type": "command",
-          "command": "grep -qiE '(D:[/\\\\]+|/d/)Backup' && { echo 'Folder backup tidak boleh diakses. Gunakan referensi backup://.' >&2; exit 2; } || exit 0"
+          "command": "grep -qiE '(D:[/\\\\]+|/d/)Backup' && { echo 'The backup folder must not be accessed. Use a backup:// reference.' >&2; exit 2; } || exit 0"
         }]
       }
     ]
@@ -245,41 +246,41 @@ Aturan `Read` berlaku untuk tool bawaan yang membaca file dan perintah Bash yang
 }
 ```
 
-Hook ini hanya mencocokkan teks, jadi perintah yang menyusun path secara tidak langsung tetap lolos. Untuk pemblokiran di level sistem operasi, aktifkan sandbox Claude Code. `8memory resolve` mengembalikan path asli, jadi tambahkan `Bash(*8memory* resolve*)` ke `deny` kalau AI tidak boleh memakainya.
+This hook only matches text, so commands that build the path indirectly still get through. For blocking at the operating system level, enable the Claude Code sandbox. `8memory resolve` returns the real path, so add `Bash(*8memory* resolve*)` to `deny` if the AI must not use it.
 
-## Tool MCP
+## MCP tools
 
-| Tool | Parameter |
+| Tool | Parameters |
 | --- | --- |
-| `journey_mark` | `title` (wajib), `cwd`, `project`, `branch`, `agent` |
+| `journey_mark` | `title` (required), `cwd`, `project`, `branch`, `agent` |
 | `journey_list` | `period` (`1d`, `7d`, `30d`, `all`), `cwd`, `project`, `branch`, `limit` |
-| `memory_write` | `change`, `feature`, `content` (wajib), `files`, `node_id`, `cwd`, `project`, `branch`, `tags`, `agent` |
+| `memory_write` | `change`, `feature`, `content` (required), `files`, `node_id`, `cwd`, `project`, `branch`, `tags`, `agent` |
 | `memory_search` | `query`, `cwd`, `project`, `branch`, `change`, `node_id`, `limit` |
 
-Pembacaan default-nya proyek dan branch saat ini. Nilai `*` pada `project` atau `branch` membaca semuanya.
+Reads default to the current project and branch. The value `*` for `project` or `branch` reads all of them.
 
-Sintaks query sama di semua backend: kata-kata harus cocok semua, `"frasa persis"`, `awalan*`, dan `OR` di antara alternatif.
+Query syntax is the same on every backend: all words must match, `"exact phrase"`, `prefix*`, and `OR` between alternatives.
 
-## Merilis ke npm
+## Publishing to npm
 
 ```sh
 node npm/build.js 0.1.0
 ```
 
-Setiap folder di `dist/npm` adalah satu paket. Jalankan `npm publish` di folder paket platform dulu, baru di `dist/npm/8memory`.
+Each folder in `dist/npm` is one package. Run `npm publish` in the platform package folders first, then in `dist/npm/8memory`.
 
-## Test
+## Tests
 
 ```sh
 go test ./...
 ```
 
-Test `MEMORY8_TEST_CLIPBOARD=1` membaca clipboard sungguhan dan dilewati secara default.
+The `MEMORY8_TEST_CLIPBOARD=1` test reads the real clipboard and is skipped by default.
 
-Backend server ikut diuji kalau env var berikut berisi JSON konfigurasi: `MEMORY8_TEST_POSTGRES`, `MEMORY8_TEST_SQLSERVER`, `MEMORY8_TEST_ORACLE`. Contoh:
+Server backends are also tested when the following env vars hold a configuration JSON: `MEMORY8_TEST_POSTGRES`, `MEMORY8_TEST_SQLSERVER`, `MEMORY8_TEST_ORACLE`. Example:
 
 ```sh
 MEMORY8_TEST_POSTGRES='{"backend":"postgres","host":"localhost","port":5432,"user":"postgres","password":"x","database":"postgres","options":"sslmode=disable"}' go test ./...
 ```
 
-Test menambah baris dengan nama project unik dan tidak menghapus apa pun, jadi gunakan database khusus test.
+The tests add rows with unique project names and delete nothing, so use a database dedicated to testing.

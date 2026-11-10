@@ -39,10 +39,10 @@ type period struct {
 }
 
 var periods = []period{
-	{"1 hari", 24 * time.Hour},
-	{"7 hari", 7 * 24 * time.Hour},
-	{"1 bulan", 30 * 24 * time.Hour},
-	{"semua", 0},
+	{"1 day", 24 * time.Hour},
+	{"7 days", 7 * 24 * time.Hour},
+	{"1 month", 30 * 24 * time.Hour},
+	{"all", 0},
 }
 
 const periodAll = 3
@@ -66,19 +66,19 @@ var groupings = []struct {
 	label string
 	key   func(entry) string
 }{
-	{"proyek/branch", func(e entry) string { return orDash(e.project) + " @ " + orDash(e.branch) }},
-	{"proyek", func(e entry) string { return orDash(e.project) }},
+	{"project/branch", func(e entry) string { return orDash(e.project) + " @ " + orDash(e.branch) }},
+	{"project", func(e entry) string { return orDash(e.project) }},
 	{"branch", func(e entry) string { return orDash(e.branch) }},
-	{"hari", func(e entry) string { return e.at.Local().Format(dateLayout) }},
+	{"day", func(e entry) string { return e.at.Local().Format(dateLayout) }},
 	{"agent", func(e entry) string { return orDash(e.agent) }},
 }
 
 var changeFilters = []struct{ value, label string }{
-	{"", "semua"},
-	{store.ChangeAdd, "tambah"},
-	{store.ChangeRemove, "kurang"},
-	{store.ChangeModify, "ubah"},
-	{store.ChangeInspect, "periksa"},
+	{"", "all"},
+	{store.ChangeAdd, "add"},
+	{store.ChangeRemove, "remove"},
+	{store.ChangeModify, "modify"},
+	{store.ChangeInspect, "inspect"},
 }
 
 func changeLabel(change string) string {
@@ -256,7 +256,7 @@ func (m *Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if tocli.HasSaved(m.attachmentsDir(), selected.node.ID) {
 				b.confirmRemove = true
 			} else {
-				b.notice = "Node ini tidak punya attachment."
+				b.notice = "This node has no attachments."
 			}
 		}
 	case "up", "k":
@@ -279,7 +279,7 @@ func (m *Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		if b.kind == listMemory {
 			b.searching = true
-			b.search = newInput(b.query, "kata kunci")
+			b.search = newInput(b.query, "keyword")
 			b.search.Focus()
 		}
 	case "r":
@@ -306,7 +306,7 @@ func (m *Model) removeSelectedAttachments() {
 		b.notice = err.Error()
 		return
 	}
-	b.notice = "Attachment dihapus."
+	b.notice = "Attachments deleted."
 }
 
 func (m *Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -360,12 +360,12 @@ func (m *Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *Model) detailLines() []string {
 	mem := m.detail
 	lines := []string{
-		"Proyek    " + orDash(mem.Project),
+		"Project   " + orDash(mem.Project),
 		"Branch    " + orDash(mem.Branch),
-		"Waktu     " + mem.CreatedAt.Local().Format(fullTime),
+		"Time      " + mem.CreatedAt.Local().Format(fullTime),
 		"Agent     " + orDash(mem.Agent),
-		"Perubahan " + changeLabel(mem.Change),
-		"Fitur     " + orDash(mem.Feature),
+		"Change    " + changeLabel(mem.Change),
+		"Feature   " + orDash(mem.Feature),
 		"Tag       " + orDash(strings.Join(mem.Tags, ", ")),
 		"Node      " + orDash(mem.NodeID),
 		"",
@@ -386,17 +386,17 @@ func (m *Model) detailLines() []string {
 func (m *Model) fileLines(file store.FileRef) []string {
 	location, err := refs.Resolve(file.Ref, m.current.Aliases)
 	if err != nil {
-		location = "alias tidak dikenal di mesin ini"
+		location = "alias unknown on this machine"
 	}
 	lines := []string{
-		"Berkas    " + file.Ref,
-		"Lokasi    " + location,
-		fmt.Sprintf("Ukuran    %d byte", file.Size),
-		"Jenis     " + orDash(file.Kind),
-		"Asal host " + orDash(file.Host),
+		"File      " + file.Ref,
+		"Location  " + location,
+		fmt.Sprintf("Size      %d bytes", file.Size),
+		"Kind      " + orDash(file.Kind),
+		"From host " + orDash(file.Host),
 	}
 	if file.RestoreHint != "" {
-		lines = append(lines, "Pulihkan  "+file.RestoreHint)
+		lines = append(lines, "Restore   "+file.RestoreHint)
 	}
 	return lines
 }
@@ -422,17 +422,17 @@ func (m *Model) viewList(b *strings.Builder) {
 	state := &m.browser
 	b.WriteString(m.listHeading() + "\n")
 	if state.searching {
-		b.WriteString("Cari: " + state.search.View() + "\n")
+		b.WriteString("Search: " + state.search.View() + "\n")
 	}
 	b.WriteString("\n")
 
 	switch {
 	case state.loading:
-		b.WriteString("Memuat...\n")
+		b.WriteString("Loading...\n")
 	case state.loadErr != "":
 		b.WriteString(errorStyle.Width(m.viewWidth()-2).Render(state.loadErr) + "\n")
 	case len(state.rows) == 0:
-		b.WriteString(dimStyle.Render("Belum ada data.") + "\n")
+		b.WriteString(dimStyle.Render("No data yet.") + "\n")
 	default:
 		m.viewRows(b)
 	}
@@ -440,7 +440,7 @@ func (m *Model) viewList(b *strings.Builder) {
 		b.WriteString("\n" + okStyle.Render(state.notice))
 	}
 	if state.confirmRemove {
-		b.WriteString("\n" + errorStyle.Render("Hapus attachment node ini? y ya · tombol lain batal") + "\n")
+		b.WriteString("\n" + errorStyle.Render("Delete this node's attachments? y yes · any other key cancels") + "\n")
 		return
 	}
 	b.WriteString("\n" + dimStyle.Render(m.listFooter()) + "\n")
@@ -450,13 +450,13 @@ func (m *Model) listHeading() string {
 	state := &m.browser
 	switch {
 	case state.node != nil:
-		return "Memori untuk: " + state.node.Title
+		return "Memories for: " + state.node.Title
 	case state.kind == listJourney:
-		return fmt.Sprintf("Journey · %s · grup %s", periods[state.period].label, groupings[state.group].label)
+		return fmt.Sprintf("Journey · %s · group %s", periods[state.period].label, groupings[state.group].label)
 	}
-	heading := fmt.Sprintf("Memori · %s · grup %s · perubahan %s", periods[state.period].label, groupings[state.group].label, changeFilters[state.change].label)
+	heading := fmt.Sprintf("Memory · %s · group %s · change %s", periods[state.period].label, groupings[state.group].label, changeFilters[state.change].label)
 	if state.query != "" {
-		heading += fmt.Sprintf(" · cari %q", state.query)
+		heading += fmt.Sprintf(" · search %q", state.query)
 	}
 	return heading
 }
@@ -464,22 +464,22 @@ func (m *Model) listHeading() string {
 func (m *Model) listFooter() string {
 	state := &m.browser
 	if state.searching {
-		return "enter cari · esc batal"
+		return "enter search · esc cancel"
 	}
-	parts := []string{"↑/↓ pilih", "enter buka", "g grup"}
+	parts := []string{"↑/↓ select", "enter open", "g group"}
 	if state.kind == listJourney {
-		parts = append(parts, "x hapus attachment")
+		parts = append(parts, "x delete attachments")
 	}
 	if state.node == nil {
-		parts = append(parts, "p periode")
+		parts = append(parts, "p period")
 	}
 	if state.kind == listMemory {
-		parts = append(parts, "c perubahan", "/ cari")
+		parts = append(parts, "c change", "/ search")
 	}
-	parts = append(parts, "r muat ulang", "esc kembali")
+	parts = append(parts, "r reload", "esc back")
 	footer := strings.Join(parts, " · ")
 	if len(state.entries) >= listLimit {
-		footer = fmt.Sprintf("hanya %d terbaru · ", listLimit) + footer
+		footer = fmt.Sprintf("only the latest %d · ", listLimit) + footer
 	}
 	return footer
 }
@@ -535,5 +535,5 @@ func (m *Model) viewDetail(b *strings.Builder) {
 	start := min(m.detailOffset, len(lines)-1)
 	end := min(start+m.bodyHeight()+1, len(lines))
 	b.WriteString(strings.Join(lines[start:end], "\n") + "\n\n")
-	b.WriteString(dimStyle.Render("↑/↓ gulir · esc kembali") + "\n")
+	b.WriteString(dimStyle.Render("↑/↓ scroll · esc back") + "\n")
 }

@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-const secretRoot = "rahasia-root"
+const secretRoot = "secret-root"
 
 var aliases = map[string]string{"backup": secretRoot}
 
 func TestResolveTranslatesPerMachine(t *testing.T) {
-	const ref = "backup://proyek/2026-11-09/database.sql"
+	const ref = "backup://project/2026-11-09/database.sql"
 	laptop, err := Resolve(ref, map[string]string{"backup": filepath.Join("laptop", "Backup")})
 	if err != nil {
 		t.Fatal(err)
@@ -20,14 +20,14 @@ func TestResolveTranslatesPerMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if laptop != filepath.Join("laptop", "Backup", "proyek", "2026-11-09", "database.sql") ||
-		vps != filepath.Join("srv", "backup", "proyek", "2026-11-09", "database.sql") {
+	if laptop != filepath.Join("laptop", "Backup", "project", "2026-11-09", "database.sql") ||
+		vps != filepath.Join("srv", "backup", "project", "2026-11-09", "database.sql") {
 		t.Fatalf("%s, %s", laptop, vps)
 	}
 }
 
 func TestResolveKeepsS3(t *testing.T) {
-	const ref = "s3://bucket/proyek/database.sql"
+	const ref = "s3://bucket/project/database.sql"
 	if got, err := Resolve(ref, nil); err != nil || got != ref {
 		t.Fatalf("%s, %v", got, err)
 	}
@@ -43,17 +43,17 @@ func TestValidateRejectsUnsafeRefs(t *testing.T) {
 		"https://example.com/x.sql",
 		"d://Backup/x.sql",
 		"BACKUP://x.sql",
-		"lain://x.sql",
+		"other://x.sql",
 		"backup://",
-		"backup://../rahasia",
-		"backup://a/../../rahasia",
+		"backup://../secret",
+		"backup://a/../../secret",
 		"backup://a/./b",
 		"backup://a//b",
 		`backup://a\..\b`,
-		"backup://C:/rahasia",
+		"backup://C:/secret",
 		"backup://a/file.sql:stream",
 		"backup://a\x00b",
-		"s3://hanyabucket",
+		"s3://bucketonly",
 		"backup://" + strings.Repeat("a", maxRefLength),
 	} {
 		if err := Validate(ref, aliases); err == nil {
@@ -63,7 +63,7 @@ func TestValidateRejectsUnsafeRefs(t *testing.T) {
 }
 
 func TestErrorsNeverExposeTheRealPath(t *testing.T) {
-	for _, ref := range []string{"lain://x", "D:/x", "backup://../x"} {
+	for _, ref := range []string{"other://x", "D:/x", "backup://../x"} {
 		if err := Validate(ref, aliases); err == nil || strings.Contains(err.Error(), secretRoot) {
 			t.Errorf("%q: %v", ref, err)
 		}
@@ -71,7 +71,7 @@ func TestErrorsNeverExposeTheRealPath(t *testing.T) {
 }
 
 func TestValidateAlias(t *testing.T) {
-	for _, name := range []string{"backup", "arsip-2", "nas"} {
+	for _, name := range []string{"backup", "archive-2", "nas"} {
 		if err := ValidateAlias(name); err != nil {
 			t.Error(err)
 		}

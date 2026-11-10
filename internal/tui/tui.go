@@ -48,6 +48,7 @@ const (
 	screenToCLIForm
 	screenProviderPick
 	screenEditor
+	screenEffortPick
 	screenAttachments
 	screenAttachPreview
 	screenCLIPreview
@@ -61,10 +62,10 @@ type backendOption struct {
 }
 
 var backendOptions = []backendOption{
-	{backend: config.SQLite, label: "SQLite", note: "file lokal, tanpa server, pencarian FTS5"},
-	{backend: config.Postgres, label: "PostgreSQL", note: "server, full-text dengan ranking relevansi", port: 5432, database: "postgres"},
-	{backend: config.SQLServer, label: "SQL Server", note: "server, pencarian LIKE tanpa ranking", port: 1433, database: "master"},
-	{backend: config.Oracle, label: "Oracle", note: "server, pencarian LIKE tanpa ranking", port: 1521, database: "FREEPDB1"},
+	{backend: config.SQLite, label: "SQLite", note: "local file, no server, FTS5 search"},
+	{backend: config.Postgres, label: "PostgreSQL", note: "server, full-text with relevance ranking", port: 5432, database: "postgres"},
+	{backend: config.SQLServer, label: "SQL Server", note: "server, LIKE search without ranking", port: 1433, database: "master"},
+	{backend: config.Oracle, label: "Oracle", note: "server, LIKE search without ranking", port: 1521, database: "FREEPDB1"},
 }
 
 // Field indexes in the network form.
@@ -210,6 +211,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateProviderPick(msg)
 		case screenEditor:
 			return m.updateEditor(msg)
+		case screenEffortPick:
+			return m.updateEffortPick(msg)
 		case screenAttachments:
 			return m.updateAttachments(msg)
 		case screenAttachPreview:
@@ -230,7 +233,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 		} else {
-			m.setStatus("Koneksi berhasil.", false)
+			m.setStatus("Connection successful.", false)
 		}
 	case preparedMsg:
 		return m.handlePrepared(msg)
@@ -242,7 +245,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.current = m.draft
 		m.screen = screenDone
-		m.setStatus(fmt.Sprintf("%d memori, %d node, dan %d aturan baru disalin.", msg.copied.Memories, msg.copied.Nodes, msg.copied.Rules), false)
+		m.setStatus(fmt.Sprintf("Copied %d new memories, %d nodes and %d rules.", msg.copied.Memories, msg.copied.Nodes, msg.copied.Rules), false)
 	}
 	return m, nil
 }
@@ -327,14 +330,14 @@ func (m *Model) openForm(option backendOption) {
 		if saved.Path == "" {
 			saved.Path = config.Default(m.configPath).Path
 		}
-		m.labels = []string{"Path file"}
+		m.labels = []string{"File path"}
 		m.inputs = []textinput.Model{newInput(saved.Path, "")}
 	} else {
 		databaseLabel := "Database"
 		if option.backend == config.Oracle {
 			databaseLabel = "Service name"
 		}
-		m.labels = []string{"Host", "Port", "User", "Password", databaseLabel, "Opsi"}
+		m.labels = []string{"Host", "Port", "User", "Password", databaseLabel, "Options"}
 		m.inputs = []textinput.Model{
 			newInput(saved.Host, ""),
 			newInput(strconv.Itoa(saved.Port), ""),
@@ -424,7 +427,7 @@ func (m *Model) readForm() (config.Config, error) {
 
 	port, err := strconv.Atoi(value(fieldPort))
 	if err != nil {
-		return config.Config{}, errors.New("port harus berupa angka")
+		return config.Config{}, errors.New("port must be a number")
 	}
 	cfg.Host, cfg.Port, cfg.User, cfg.Database, cfg.Options =
 		value(fieldHost), port, value(fieldUser), value(fieldDatabase), value(fieldOptions)
@@ -436,7 +439,7 @@ func (m *Model) readForm() (config.Config, error) {
 // the server from arbitrary working directories.
 func absolutePath(path string) (string, error) {
 	if path == "" {
-		return "", errors.New("path wajib diisi")
+		return "", errors.New("path is required")
 	}
 	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		home, err := os.UserHomeDir()
@@ -458,7 +461,7 @@ func (m *Model) startTest() (tea.Model, tea.Cmd) {
 		m.setStatus(err.Error(), true)
 		return m, nil
 	}
-	m.draft, m.screen, m.busyLabel = cfg, screenBusy, "Menguji koneksi..."
+	m.draft, m.screen, m.busyLabel = cfg, screenBusy, "Testing connection..."
 	ctx := m.ctx
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, connectTimeout)
@@ -473,7 +476,7 @@ func (m *Model) startSave() (tea.Model, tea.Cmd) {
 		m.setStatus(err.Error(), true)
 		return m, nil
 	}
-	m.draft, m.screen, m.busyLabel = cfg, screenBusy, "Menyiapkan penyimpanan..."
+	m.draft, m.screen, m.busyLabel = cfg, screenBusy, "Preparing storage..."
 	ctx, current := m.ctx, m.current
 	return m, func() tea.Msg { return prepare(ctx, current, cfg) }
 }
@@ -521,7 +524,7 @@ func (m *Model) handlePrepared(msg preparedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.warning = ""
 	if msg.sourceErr != nil {
-		m.warning = "Backend lama tidak bisa dibaca, jadi tidak ada memori yang disalin: " + msg.sourceErr.Error()
+		m.warning = "The old backend could not be read, so no memories were copied: " + msg.sourceErr.Error()
 	}
 	if msg.memories+msg.nodes+msg.rules > 0 {
 		m.memories, m.nodes, m.ruleCount, m.screen = msg.memories, msg.nodes, msg.rules, screenConfirmCopy
@@ -545,9 +548,9 @@ func (m *Model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // finish saves the config only after any copy succeeded, so a failed copy
 // leaves every client on the backend that still has the data.
 func (m *Model) finish(copyData bool) (tea.Model, tea.Cmd) {
-	m.screen, m.busyLabel = screenBusy, "Menyimpan..."
+	m.screen, m.busyLabel = screenBusy, "Saving..."
 	if copyData {
-		m.busyLabel = fmt.Sprintf("Menyalin %d memori, %d node, dan %d aturan...", m.memories, m.nodes, m.ruleCount)
+		m.busyLabel = fmt.Sprintf("Copying %d memories, %d nodes and %d rules...", m.memories, m.nodes, m.ruleCount)
 	}
 	ctx, source, target, path := m.ctx, m.current, m.draft, m.configPath
 	return m, func() tea.Msg {
@@ -555,7 +558,7 @@ func (m *Model) finish(copyData bool) (tea.Model, tea.Cmd) {
 		if copyData {
 			var err error
 			if copied, err = copyAll(ctx, source, target); err != nil {
-				return savedMsg{err: fmt.Errorf("penyalinan gagal, konfigurasi tidak diubah: %w", err)}
+				return savedMsg{err: fmt.Errorf("copy failed, configuration unchanged: %w", err)}
 			}
 		}
 		return savedMsg{copied: copied, err: config.Save(path, target)}
@@ -605,6 +608,8 @@ func (m *Model) render() string {
 		m.viewProviderPick(&b)
 	case screenEditor:
 		m.viewEditor(&b)
+	case screenEffortPick:
+		m.viewEffortPick(&b)
 	case screenAttachments:
 		m.viewAttachments(&b)
 	case screenAttachPreview:
@@ -618,15 +623,15 @@ func (m *Model) render() string {
 	case screenBusy:
 		b.WriteString(m.busyLabel + "\n")
 	case screenConfirmCopy:
-		fmt.Fprintf(&b, "Ada %d memori, %d node journey, dan %d aturan di backend aktif.\nSalin ke %s?\n\n", m.memories, m.nodes, m.ruleCount, m.draft.Describe())
-		b.WriteString(dimStyle.Render("y salin · n pindah tanpa menyalin · esc kembali") + "\n")
+		fmt.Fprintf(&b, "The active backend has %d memories, %d journey nodes and %d rules.\nCopy to %s?\n\n", m.memories, m.nodes, m.ruleCount, m.draft.Describe())
+		b.WriteString(dimStyle.Render("y copy · n switch without copying · esc back") + "\n")
 	case screenDone:
-		b.WriteString(okStyle.Render("Tersimpan.") + " " + m.status + "\n")
+		b.WriteString(okStyle.Render("Saved.") + " " + m.status + "\n")
 		if m.warning != "" {
 			b.WriteString(errorStyle.Render(m.warning) + "\n")
 		}
-		b.WriteString("Restart AI client yang sedang berjalan agar memakai backend baru.\n\n")
-		b.WriteString(dimStyle.Render("tekan tombol apa saja untuk kembali ke menu") + "\n")
+		b.WriteString("Restart any running AI client so it uses the new backend.\n\n")
+		b.WriteString(dimStyle.Render("press any key to return to the menu") + "\n")
 	}
 	return b.String()
 }
@@ -659,7 +664,7 @@ func (m *Model) viewPick(b *strings.Builder) {
 		}
 		fmt.Fprintf(b, "%s%-12s %s\n", marker, option.label, dimStyle.Render(option.note))
 	}
-	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter lanjut · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select · enter continue · esc back") + "\n")
 }
 
 func (m *Model) viewForm(b *strings.Builder) {
@@ -678,5 +683,5 @@ func (m *Model) viewForm(b *strings.Builder) {
 		}
 		b.WriteString("\n" + style.Width(76).Render(m.status) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("tab pindah · ctrl+t tes koneksi · ctrl+s simpan · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("tab next · ctrl+t test connection · ctrl+s save · esc back") + "\n")
 }

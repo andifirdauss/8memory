@@ -20,8 +20,8 @@ const (
 	approvalRows     = 10
 	chatTopLines     = 3 // the title block drawn by render
 	shutdownWait     = 5 * time.Second
-	stoppedMessage   = "Dihentikan."
-	waitForReplyNote = "Tunggu balasan selesai, atau tekan esc untuk menghentikannya."
+	stoppedMessage   = "Stopped."
+	waitForReplyNote = "Wait for the reply to finish, or press esc to stop it."
 )
 
 type chatKind int
@@ -227,9 +227,9 @@ func (m *Model) answerApproval(allow bool) {
 	current := t.pending[0]
 	current.Answer(allow)
 	t.pending, t.approvalOffset = t.pending[1:], 0
-	verdict := "Ditolak: "
+	verdict := "Denied: "
 	if allow {
-		verdict = "Diizinkan: "
+		verdict = "Allowed: "
 	}
 	m.addEntry(chatInfo, verdict+current.ToolName)
 }
@@ -288,7 +288,7 @@ func (m *Model) transcript(width, height int) string {
 		all = append(all, entry.wrapped(width)...)
 	}
 	if len(all) == 0 {
-		all = []string{dimStyle.Render("Tulis prompt di bawah. Setiap prompt diperkaya aturan dan memori dari 8memory.")}
+		all = []string{dimStyle.Render("Write a prompt below. Every prompt is enriched with rules and memory from 8memory.")}
 	}
 	t.scroll = min(t.scroll, max(len(all)-height, 0))
 	end := len(all) - t.scroll
@@ -301,10 +301,10 @@ func (m *Model) chatStatusLines(width int) string {
 	t := &m.tocli
 	var b strings.Builder
 	if t.running && len(t.pending) == 0 {
-		b.WriteString(dimStyle.Render(m.currentProvider().Label()+" bekerja...") + "\n")
+		b.WriteString(dimStyle.Render(m.currentProvider().Label()+" working...") + "\n")
 	}
 	if len(t.attachments) > 0 {
-		b.WriteString(dimStyle.Render(strconv.Itoa(len(t.attachments))+" attachment") + "\n")
+		b.WriteString(dimStyle.Render(strconv.Itoa(len(t.attachments))+" attachment(s)") + "\n")
 	}
 	if t.status != "" {
 		style := dimStyle
@@ -320,18 +320,18 @@ func (m *Model) approvalFooter(width int) string {
 	t := &m.tocli
 	current := t.pending[0]
 	var b strings.Builder
-	heading := "Izin diminta: " + current.ToolName
+	heading := "Permission requested: " + current.ToolName
 	if count := len(t.pending); count > 1 {
-		heading += fmt.Sprintf(" (%d lagi menunggu)", count-1)
+		heading += fmt.Sprintf(" (%d more waiting)", count-1)
 	}
 	b.WriteString(errorStyle.Render(heading) + "\n")
 	lines := wrapText(current.Detail, width)
 	t.approvalOffset = min(t.approvalOffset, max(len(lines)-approvalRows, 0))
 	end := min(t.approvalOffset+approvalRows, len(lines))
 	b.WriteString(strings.Join(lines[t.approvalOffset:end], "\n") + "\n")
-	hint := "ctrl+y izinkan · esc tolak"
+	hint := "ctrl+y allow · esc deny"
 	if len(lines) > approvalRows {
-		hint += fmt.Sprintf(" · ↑/↓ gulir (baris %d-%d dari %d)", t.approvalOffset+1, end, len(lines))
+		hint += fmt.Sprintf(" · ↑/↓ scroll (lines %d-%d of %d)", t.approvalOffset+1, end, len(lines))
 	}
 	b.WriteString(dimStyle.Width(width).Render(hint) + "\n")
 	return b.String()
@@ -348,15 +348,15 @@ func (m *Model) chatFooter(width int) string {
 	}
 	b.WriteString(t.editor.render(width, chatEditorRows) + "\n")
 	if t.asking {
-		b.WriteString("Path file: " + t.pathInput.View() + "\n")
+		b.WriteString("File path: " + t.pathInput.View() + "\n")
 	}
 	b.WriteString(m.chatStatusLines(width))
-	hint := "/ perintah · enter kirim · shift+enter atau ctrl+j baris baru · pgup/pgdn gulir · alt+v gambar · ctrl+o file · ctrl+e attachment · esc keluar"
+	hint := "/ commands · enter send · shift+enter or ctrl+j new line · pgup/pgdn scroll · alt+v image · ctrl+o file · ctrl+e attachments · esc exit"
 	switch {
 	case t.asking:
-		hint = "enter tambahkan · esc batal"
+		hint = "enter add · esc cancel"
 	case t.running:
-		hint = "esc atau ctrl+c hentikan · pgup/pgdn gulir"
+		hint = "esc or ctrl+c stop · pgup/pgdn scroll"
 	}
 	b.WriteString(dimStyle.Width(width).Render(hint) + "\n")
 	return b.String()
@@ -364,7 +364,11 @@ func (m *Model) chatFooter(width int) string {
 
 func (m *Model) viewEditor(b *strings.Builder) {
 	width := m.viewWidth() - 2
-	fmt.Fprintf(b, "Chat · %s · %s\n\n", m.currentProvider().Label(), m.location())
+	effort := ""
+	if m.tocli.effort != "" {
+		effort = " · effort " + m.tocli.effort
+	}
+	fmt.Fprintf(b, "Chat · %s · %s%s\n\n", m.currentProvider().Label(), m.location(), effort)
 	footer := m.chatFooter(width)
 	height := m.height
 	if height == 0 {

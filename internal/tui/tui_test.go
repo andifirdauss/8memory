@@ -93,8 +93,8 @@ func newFixture(t *testing.T, contents ...string) *fixture {
 	dir := t.TempDir()
 	f := &fixture{
 		configPath: filepath.Join(dir, "config.json"),
-		source:     config.Config{Backend: config.SQLite, Path: filepath.Join(dir, "lama.db")},
-		targetPath: filepath.Join(dir, "baru", "baru.db"),
+		source:     config.Config{Backend: config.SQLite, Path: filepath.Join(dir, "old.db")},
+		targetPath: filepath.Join(dir, "new", "new.db"),
 	}
 	seed(t, f.source, contents...)
 	f.model = New(f.configPath, f.source)
@@ -110,13 +110,13 @@ func (f *fixture) submitNewPath() {
 }
 
 func TestSwitchWithCopy(t *testing.T) {
-	f := newFixture(t, "satu", "dua", "tiga")
+	f := newFixture(t, "one", "two", "three")
 	f.submitNewPath()
 
 	if f.model.screen != screenConfirmCopy || f.model.memories != 3 {
 		t.Fatalf("screen %d, memories %d, status %q", f.model.screen, f.model.memories, f.model.status)
 	}
-	if !strings.Contains(f.model.render(), "Ada 3 memori") {
+	if !strings.Contains(f.model.render(), "has 3 memories") {
 		t.Fatal(f.model.render())
 	}
 	send(f.model, key('y'))
@@ -124,7 +124,7 @@ func TestSwitchWithCopy(t *testing.T) {
 	if f.model.screen != screenDone {
 		t.Fatalf("screen %d, status %q", f.model.screen, f.model.status)
 	}
-	if !strings.Contains(f.model.render(), "3 memori, 0 node, dan 0 aturan baru disalin") {
+	if !strings.Contains(f.model.render(), "Copied 3 new memories, 0 nodes and 0 rules") {
 		t.Fatal(f.model.render())
 	}
 	saved, err := config.Load(f.configPath)
@@ -150,7 +150,7 @@ func TestSwitchingStorageKeepsAliases(t *testing.T) {
 }
 
 func TestSwitchWithoutCopy(t *testing.T) {
-	f := newFixture(t, "satu")
+	f := newFixture(t, "one")
 	f.submitNewPath()
 	send(f.model, key('n'))
 
@@ -172,7 +172,7 @@ func TestEmptySourceSkipsCopyPrompt(t *testing.T) {
 }
 
 func TestSamePathSkipsCopyPrompt(t *testing.T) {
-	f := newFixture(t, "satu")
+	f := newFixture(t, "one")
 	send(f.model, enter)
 	send(f.model, save)
 	if f.model.screen != screenDone {
@@ -181,7 +181,7 @@ func TestSamePathSkipsCopyPrompt(t *testing.T) {
 }
 
 func TestFailedConnectionKeepsConfigUntouched(t *testing.T) {
-	f := newFixture(t, "satu")
+	f := newFixture(t, "one")
 	send(f.model, down) // PostgreSQL
 	send(f.model, enter)
 	if f.model.option.backend != config.Postgres {
@@ -190,7 +190,7 @@ func TestFailedConnectionKeepsConfigUntouched(t *testing.T) {
 	f.model.inputs[fieldHost].SetValue("127.0.0.1")
 	f.model.inputs[fieldPort].SetValue("1") // nothing listens here
 	f.model.inputs[fieldUser].SetValue("u")
-	f.model.inputs[fieldPassword].SetValue("rahasia-sekali")
+	f.model.inputs[fieldPassword].SetValue("very-secret")
 
 	send(f.model, test)
 	if f.model.screen != screenForm || !f.model.statusErr {
@@ -200,7 +200,7 @@ func TestFailedConnectionKeepsConfigUntouched(t *testing.T) {
 	if f.model.screen != screenForm || !f.model.statusErr {
 		t.Fatalf("screen %d, status %q", f.model.screen, f.model.status)
 	}
-	if strings.Contains(f.model.status, "rahasia-sekali") {
+	if strings.Contains(f.model.status, "very-secret") {
 		t.Fatal("password leaked into status")
 	}
 	saved, err := config.Load(f.configPath)
@@ -222,9 +222,9 @@ func TestInvalidPortShowsError(t *testing.T) {
 
 func TestFormMasksPassword(t *testing.T) {
 	f := newFixture(t)
-	f.model.current = config.Config{Backend: config.Postgres, Host: "h", Port: 5432, User: "u", Password: "rahasia", Database: "d"}
+	f.model.current = config.Config{Backend: config.Postgres, Host: "h", Port: 5432, User: "u", Password: "secret", Database: "d"}
 	f.model.openForm(backendOptions[1])
-	if strings.Contains(f.model.render(), "rahasia") {
+	if strings.Contains(f.model.render(), "secret") {
 		t.Fatal(f.model.render())
 	}
 }
@@ -243,7 +243,7 @@ func TestSwitchToServerBackend(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			marker := fmt.Sprintf("penanda%d", time.Now().UnixNano())
+			marker := fmt.Sprintf("marker%d", time.Now().UnixNano())
 			f := newFixture(t, marker)
 			f.model.openForm(backendOptions[i])
 			f.model.inputs[fieldHost].SetValue(target.Host)

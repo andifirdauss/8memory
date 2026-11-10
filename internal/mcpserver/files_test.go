@@ -14,7 +14,7 @@ import (
 	"8memory/internal/store"
 )
 
-const backupRoot = "folder-rahasia-backup"
+const backupRoot = "secret-backup-folder"
 
 func connectWithBackup(t *testing.T) (context.Context, *mcp.ClientSession) {
 	t.Helper()
@@ -82,7 +82,7 @@ func TestContentGuardAllowsNormalNotes(t *testing.T) {
 	for i, content := range []string{
 		strings.Repeat("a", maxContentBytes),
 		strings.Repeat("INSERT INTO t VALUES (1);\n", dumpInsertLimit-1),
-		"Menambahkan pengecekan INSERT INTO pada migrasi",
+		"Added an INSERT INTO check to the migration",
 	} {
 		args := writeArgs(content)
 		args["project"] = fmt.Sprintf("demo-%d", i)
@@ -92,9 +92,9 @@ func TestContentGuardAllowsNormalNotes(t *testing.T) {
 
 func TestFilesAreStoredAndFilledWithHost(t *testing.T) {
 	ctx, session := connectWithBackup(t)
-	saved := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Backup sebelum migrasi",
+	saved := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Backup before migration",
 		map[string]any{"ref": "backup://demo/2026-11-09/database.sql", "size": 1048576, "kind": "postgres-dump", "restore_hint": "psql -f database.sql"},
-		map[string]any{"ref": "s3://arsip/demo/uploads.tar", "host": "vps-1"},
+		map[string]any{"ref": "s3://archive/demo/uploads.tar", "host": "vps-1"},
 	)))
 	if len(saved.Files) != 2 {
 		t.Fatalf("%+v", saved)
@@ -108,7 +108,7 @@ func TestFilesAreStoredAndFilledWithHost(t *testing.T) {
 		t.Fatalf("%+v", second)
 	}
 
-	found := decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", map[string]any{"query": "migrasi", "project": "demo", "branch": "*"}))
+	found := decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", map[string]any{"query": "migration", "project": "demo", "branch": "*"}))
 	if len(found.Memories) != 1 || len(found.Memories[0].Files) != 2 || found.Memories[0].Files[0].Ref != first.Ref {
 		t.Fatalf("%+v", found)
 	}
@@ -123,12 +123,12 @@ func TestInvalidFilesRejected(t *testing.T) {
 	for _, file := range []map[string]any{
 		{"ref": `D:\Backup\database.sql`},
 		{"ref": "/srv/backup/database.sql"},
-		{"ref": "lain://demo/database.sql"},
-		{"ref": "backup://../rahasia"},
+		{"ref": "other://demo/database.sql"},
+		{"ref": "backup://../secret"},
 		{"ref": "backup://demo/a.sql", "size": -1},
 		{"ref": "backup://demo/a.sql", "restore_hint": strings.Repeat("x", maxHintRunes+1)},
 	} {
-		message := toolError(t, callText(t, ctx, session, "memory_write", writeArgs("isi", file)))
+		message := toolError(t, callText(t, ctx, session, "memory_write", writeArgs("text", file)))
 		if strings.Contains(message, backupRoot) {
 			t.Fatalf("real path exposed: %s", message)
 		}
@@ -137,14 +137,14 @@ func TestInvalidFilesRejected(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = map[string]any{"ref": fmt.Sprintf("backup://demo/%d.sql", i)}
 	}
-	toolError(t, callText(t, ctx, session, "memory_write", writeArgs("isi", tooMany...)))
+	toolError(t, callText(t, ctx, session, "memory_write", writeArgs("text", tooMany...)))
 }
 
 func TestSameNoteWithDifferentFileIsKept(t *testing.T) {
 	ctx, session := connectWithBackup(t)
-	first := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Backup harian", map[string]any{"ref": "backup://demo/senin.sql"})))
-	second := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Backup harian", map[string]any{"ref": "backup://demo/selasa.sql"})))
-	if first.ID == second.ID || second.Files[0].Ref != "backup://demo/selasa.sql" {
+	first := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Daily backup", map[string]any{"ref": "backup://demo/monday.sql"})))
+	second := decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", writeArgs("Daily backup", map[string]any{"ref": "backup://demo/tuesday.sql"})))
+	if first.ID == second.ID || second.Files[0].Ref != "backup://demo/tuesday.sql" {
 		t.Fatalf("second backup was dropped: %+v %+v", first, second)
 	}
 }

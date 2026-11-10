@@ -78,15 +78,15 @@ func TestMemoriesSeparatedByBranchButReadable(t *testing.T) {
 
 	write := func(feature string) store.Memory {
 		return decode[store.Memory](t, mustCall(t, ctx, session, "memory_write", map[string]any{
-			"change": "add", "feature": feature, "content": "isi " + feature, "cwd": dir,
+			"change": "add", "feature": feature, "content": "text " + feature, "cwd": dir,
 		}))
 	}
-	onMain := write("Di main")
+	onMain := write("On main")
 	if onMain.Project != "repo-demo" || onMain.Branch != "main" {
 		t.Fatalf("%+v", onMain)
 	}
-	gitRun(t, dir, "switch", "-c", "fitur")
-	if onFeature := write("Di fitur"); onFeature.Branch != "fitur" {
+	gitRun(t, dir, "switch", "-c", "feature")
+	if onFeature := write("On feature"); onFeature.Branch != "feature" {
 		t.Fatalf("%+v", onFeature)
 	}
 
@@ -94,16 +94,16 @@ func TestMemoriesSeparatedByBranchButReadable(t *testing.T) {
 		args["cwd"] = dir
 		return features(decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", args)))
 	}
-	if got := search(map[string]any{}); got != "Di fitur" {
+	if got := search(map[string]any{}); got != "On feature" {
 		t.Fatalf("current branch: %q", got)
 	}
-	if got := search(map[string]any{"branch": "main"}); got != "Di main" {
+	if got := search(map[string]any{"branch": "main"}); got != "On main" {
 		t.Fatalf("named branch: %q", got)
 	}
-	if got := search(map[string]any{"branch": "*"}); got != "Di fitur|Di main" {
+	if got := search(map[string]any{"branch": "*"}); got != "On feature|On main" {
 		t.Fatalf("every branch: %q", got)
 	}
-	if got := search(map[string]any{"project": "proyek-lain"}); got != "" {
+	if got := search(map[string]any{"project": "other-project"}); got != "" {
 		t.Fatalf("other project: %q", got)
 	}
 }
@@ -111,8 +111,8 @@ func TestMemoriesSeparatedByBranchButReadable(t *testing.T) {
 func TestNamedProjectIgnoresCurrentBranch(t *testing.T) {
 	ctx, session := connect(t)
 	dir := gitRepo(t)
-	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "F", "content": "isi", "project": "lain", "branch": "develop", "cwd": dir})
-	got := decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", map[string]any{"project": "lain", "cwd": dir}))
+	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "F", "content": "text", "project": "other", "branch": "develop", "cwd": dir})
+	got := decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", map[string]any{"project": "other", "cwd": dir}))
 	if len(got.Memories) != 1 {
 		t.Fatalf("%+v", got)
 	}
@@ -121,9 +121,9 @@ func TestNamedProjectIgnoresCurrentBranch(t *testing.T) {
 func TestMemoryWriteRequiresChangeAndFeature(t *testing.T) {
 	ctx, session := connect(t)
 	for _, args := range []map[string]any{
-		{"change": "", "feature": "F", "content": "isi"},
-		{"change": "add", "feature": " ", "content": "isi"},
-		{"change": "hapus", "feature": "F", "content": "isi"},
+		{"change": "", "feature": "F", "content": "text"},
+		{"change": "add", "feature": " ", "content": "text"},
+		{"change": "delete", "feature": "F", "content": "text"},
 	} {
 		if result := callText(t, ctx, session, "memory_write", args); !result.IsError {
 			t.Errorf("accepted %v", args)
@@ -135,22 +135,22 @@ func TestJourneyMarkLinksMemories(t *testing.T) {
 	ctx, session := connect(t)
 	dir := gitRepo(t)
 
-	node := decode[store.Node](t, mustCall(t, ctx, session, "journey_mark", map[string]any{"title": "Tambah ekspor", "cwd": dir, "agent": "codex"}))
+	node := decode[store.Node](t, mustCall(t, ctx, session, "journey_mark", map[string]any{"title": "Add export", "cwd": dir, "agent": "codex"}))
 	if node.ID == "" || node.Project != "repo-demo" || node.Branch != "main" {
 		t.Fatalf("%+v", node)
 	}
-	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "Ekspor", "content": "isi", "cwd": dir, "node_id": node.ID})
-	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "inspect", "feature": "Audit", "content": "isi lain", "cwd": dir, "node_id": node.ID})
-	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "Tak tertaut", "content": "isi ketiga", "cwd": dir})
+	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "Export", "content": "text", "cwd": dir, "node_id": node.ID})
+	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "inspect", "feature": "Audit", "content": "other text", "cwd": dir, "node_id": node.ID})
+	mustCall(t, ctx, session, "memory_write", map[string]any{"change": "add", "feature": "Unlinked", "content": "third text", "cwd": dir})
 
 	// node_id must work from anywhere, regardless of the caller's branch.
 	linked := decode[searchOutput](t, mustCall(t, ctx, session, "memory_search", map[string]any{"node_id": node.ID, "cwd": t.TempDir()}))
-	if got := features(linked); got != "Audit|Ekspor" {
+	if got := features(linked); got != "Audit|Export" {
 		t.Fatalf("%q", got)
 	}
 
 	list := mustCall(t, ctx, session, "journey_list", map[string]any{"cwd": dir}).Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"## repo-demo @ main", node.ID, "Tambah ekspor", "[codex]"} {
+	for _, want := range []string{"## repo-demo @ main", node.ID, "Add export", "[codex]"} {
 		if !strings.Contains(list, want) {
 			t.Fatalf("missing %q in:\n%s", want, list)
 		}

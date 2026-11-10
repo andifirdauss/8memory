@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,22 +16,23 @@ type slashCommand struct{ name, description string }
 // slashCommands run in 8memory itself. Any other text starting with a slash
 // goes to the provider's CLI like a normal prompt.
 var slashCommands = []slashCommand{
-	{"/help", "daftar perintah dan tombol"},
-	{"/new", "mulai percakapan baru"},
-	{"/clear", "bersihkan layar dan mulai percakapan baru"},
-	{"/usage", "sisa kuota provider, tanpa memakai kuota"},
-	{"/exit", "akhiri sesi ini"},
+	{"/help", "list commands and keys"},
+	{"/new", "start a new conversation"},
+	{"/clear", "clear the screen and start a new conversation"},
+	{"/effort", "set the provider effort for this session"},
+	{"/usage", "remaining provider quota, without using any"},
+	{"/exit", "end this session"},
 }
 
-const slashHelpKeys = `Tombol:
-  enter            kirim prompt
-  shift+enter      baris baru (juga ctrl+j)
-  alt+v            gambar dari clipboard
-  ctrl+o           tambah file
-  ctrl+e           daftar attachment
-  pgup, pgdn       gulir percakapan
-  esc, ctrl+c      hentikan prompt yang berjalan
-  esc dua kali     akhiri sesi`
+const slashHelpKeys = `Keys:
+  enter            send prompt
+  shift+enter      new line (also ctrl+j)
+  alt+v            image from clipboard
+  ctrl+o           add file
+  ctrl+e           list attachments
+  pgup, pgdn       scroll the conversation
+  esc, ctrl+c      stop the running prompt
+  esc twice        end the session`
 
 // slashMatches lists the commands the editor's text could become. The menu
 // only applies to a single word, so a prompt that merely starts with a path
@@ -85,6 +87,8 @@ func (m *Model) runSlash(name string) (tea.Model, tea.Cmd) {
 		m.addEntry(chatInfo, m.slashHelp())
 	case "/new", "/clear":
 		m.slashNew()
+	case "/effort":
+		m.slashEffort()
 	case "/usage":
 		m.slashUsage()
 	case "/exit":
@@ -106,13 +110,102 @@ func (m *Model) slashNew() {
 	t.entries, t.session = nil, ""
 }
 
+// effortDefault leaves the effort to the CLI's own setting.
+const effortDefault = "default"
+
+func (m *Model) effortChoices() []string {
+	return append([]string{effortDefault}, m.currentProvider().Efforts()...)
+}
+
+// effortArgument recognizes "/effort <level>". The menu only covers a single
+// word, so without this the command would be sent to the CLI as a prompt.
+func effortArgument(text string) (string, bool) {
+	fields := strings.Fields(text)
+	if len(fields) != 2 || fields[0] != "/effort" {
+		return "", false
+	}
+	return strings.ToLower(fields[1]), true
+}
+
+// slashEffort opens the list of levels with the current one selected.
+func (m *Model) slashEffort() {
+	t := &m.tocli
+	if t.running || t.sending {
+		m.setEditorStatus(waitForReplyNote, false)
+		return
+	}
+	t.effortCursor = max(slices.Index(m.effortChoices(), t.effort), 0)
+	m.screen = screenEffortPick
+}
+
+// slashEffortLevel handles "/effort <level>". A wrong level stays in the
+// editor so it can be corrected.
+func (m *Model) slashEffortLevel(level string) {
+	t := &m.tocli
+	if t.running || t.sending {
+		m.setEditorStatus(waitForReplyNote, false)
+		return
+	}
+	choices := m.effortChoices()
+	if !slices.Contains(choices, level) {
+		m.setEditorStatus(fmt.Sprintf("Effort %q is not known to %s. Choices: %s.", level, m.currentProvider().Label(), strings.Join(choices, ", ")), true)
+		return
+	}
+	t.editor.reset()
+	m.setEffort(level)
+}
+
+// setEffort applies from the next prompt on, in the same conversation.
+func (m *Model) setEffort(level string) {
+	if level == effortDefault {
+		m.tocli.effort = ""
+		m.setEditorStatus("Effort reset to the default of "+m.currentProvider().Label()+".", false)
+		return
+	}
+	m.tocli.effort = level
+	m.setEditorStatus("Effort "+level+" applies from the next prompt.", false)
+}
+
+func (m *Model) updateEffortPick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	t := &m.tocli
+	choices := m.effortChoices()
+	switch msg.String() {
+	case "up", "k":
+		t.effortCursor = max(t.effortCursor-1, 0)
+	case "down", "j":
+		t.effortCursor = min(t.effortCursor+1, len(choices)-1)
+	case "enter":
+		m.setEffort(choices[t.effortCursor])
+		m.screen = screenEditor
+	case "q", "esc":
+		m.screen = screenEditor
+	}
+	return m, nil
+}
+
+func (m *Model) viewEffortPick(b *strings.Builder) {
+	t := &m.tocli
+	b.WriteString("Effort · " + m.currentProvider().Label() + "\n\n")
+	for i, choice := range m.effortChoices() {
+		marker := "  "
+		if i == t.effortCursor {
+			marker = "> "
+		}
+		if choice == effortDefault {
+			choice += dimStyle.Render("  use the CLI setting")
+		}
+		b.WriteString(marker + choice + "\n")
+	}
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select · enter use · esc back") + "\n")
+}
+
 func (m *Model) slashHelp() string {
 	var b strings.Builder
-	b.WriteString("Perintah:\n")
+	b.WriteString("Commands:\n")
 	for _, command := range slashCommands {
 		fmt.Fprintf(&b, "  %-16s %s\n", command.name, command.description)
 	}
-	b.WriteString("Teks lain yang diawali / diteruskan ke " + m.currentProvider().Label() + ".\n\n")
+	b.WriteString("Other text starting with / is passed to " + m.currentProvider().Label() + ".\n\n")
 	return b.String() + slashHelpKeys
 }
 
@@ -127,7 +220,7 @@ func (m *Model) slashUsage() {
 	provider := m.currentProvider()
 	m.addEntry(chatUser, "/usage")
 	if provider.UsageArgs() == nil {
-		m.addEntry(chatInfo, provider.Label()+" tidak menyediakan sisa kuota di mode ini. Lihat langsung di CLI-nya.")
+		m.addEntry(chatInfo, provider.Label()+" does not report remaining quota in this mode. Check its CLI directly.")
 		return
 	}
 	turnCtx, stop := context.WithCancel(t.chatCtx)

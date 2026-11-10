@@ -45,7 +45,7 @@ func TestToolsWriteThenSearch(t *testing.T) {
 	}
 
 	written, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{
-		"change": "modify", "feature": "Auth", "content": "Auth dipindah ke cookie", "project": "demo", "tags": []string{"login"}, "agent": "claude",
+		"change": "modify", "feature": "Auth", "content": "Auth moved to a cookie", "project": "demo", "tags": []string{"login"}, "agent": "claude",
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestToolsWriteThenSearch(t *testing.T) {
 		if err := json.Unmarshal(raw, &out); err != nil {
 			t.Fatal(err)
 		}
-		if len(out.Memories) != 1 || out.Memories[0].Content != "Auth dipindah ke cookie" {
+		if len(out.Memories) != 1 || out.Memories[0].Content != "Auth moved to a cookie" {
 			t.Fatalf("query %q: %s", query, raw)
 		}
 	}
@@ -75,7 +75,7 @@ func TestToolsWriteThenSearch(t *testing.T) {
 
 func TestSearchWithNoResultsIsNotAnError(t *testing.T) {
 	ctx, session := connect(t)
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "memory_search", Arguments: map[string]any{"query": "tidakada"}})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "memory_search", Arguments: map[string]any{"query": "nonexistent"}})
 	if err != nil {
 		t.Fatal(err)
 	}

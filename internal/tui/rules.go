@@ -16,7 +16,7 @@ import (
 
 var ruleScopes = []struct{ value, label string }{
 	{store.ScopeGlobal, "global"},
-	{store.ScopeProject, "proyek"},
+	{store.ScopeProject, "project"},
 	{store.ScopeBranch, "branch"},
 }
 
@@ -164,7 +164,7 @@ func (m *Model) openRuleForm(existing *store.Rule) tea.Cmd {
 			project, branch = here.Project, here.Branch
 		}
 	}
-	r.inputs = []textinput.Model{newInput(project, ""), newInput(branch, ""), newInput(text, "tulis aturan")}
+	r.inputs = []textinput.Model{newInput(project, ""), newInput(branch, ""), newInput(text, "write a rule")}
 	r.inputs[2].SetWidth(60)
 	m.screen = screenRuleForm
 	return nil
@@ -251,14 +251,14 @@ func ruleLocation(rule store.Rule) string {
 
 func (m *Model) viewRules(b *strings.Builder) {
 	r := &m.rules
-	b.WriteString("Aturan\n\n")
+	b.WriteString("Rules\n\n")
 	switch {
 	case r.loading:
-		b.WriteString("Memuat...\n")
+		b.WriteString("Loading...\n")
 	case r.err != "":
 		b.WriteString(errorStyle.Width(m.viewWidth()-2).Render(r.err) + "\n")
 	case len(r.list) == 0:
-		b.WriteString(dimStyle.Render("Belum ada aturan.") + "\n")
+		b.WriteString(dimStyle.Render("No rules yet.") + "\n")
 	default:
 		height := m.bodyHeight()
 		start := max(r.cursor-height+1, 0)
@@ -275,18 +275,18 @@ func (m *Model) viewRules(b *strings.Builder) {
 	}
 	b.WriteString("\n")
 	if r.confirmDelete {
-		b.WriteString(errorStyle.Render("Hapus aturan ini? y ya · tombol lain batal") + "\n")
+		b.WriteString(errorStyle.Render("Delete this rule? y yes · any other key cancels") + "\n")
 		return
 	}
-	b.WriteString(dimStyle.Render("↑/↓ pilih · a tambah · enter ubah · d hapus · esc kembali") + "\n")
+	b.WriteString(dimStyle.Render("↑/↓ select · a add · enter edit · d delete · esc back") + "\n")
 }
 
 func (m *Model) viewRuleForm(b *strings.Builder) {
 	r := &m.rules
 	if r.editing != nil {
-		b.WriteString("Ubah aturan\n\n")
+		b.WriteString("Edit rule\n\n")
 	} else {
-		b.WriteString("Tambah aturan\n\n")
+		b.WriteString("Add rule\n\n")
 	}
 	marker := func(field int) string {
 		if r.focus == field {
@@ -302,12 +302,12 @@ func (m *Model) viewRuleForm(b *strings.Builder) {
 		}
 		scopes = append(scopes, label)
 	}
-	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldScope), "Cakupan", strings.Join(scopes, " "))
-	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldProject), "Proyek", r.inputs[0].View())
+	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldScope), "Scope", strings.Join(scopes, " "))
+	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldProject), "Project", r.inputs[0].View())
 	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldBranch), "Branch", r.inputs[1].View())
-	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldText), "Aturan", r.inputs[2].View())
+	fmt.Fprintf(b, "%s%-9s %s\n", marker(ruleFieldText), "Rule", r.inputs[2].View())
 	if r.formErr != "" {
 		b.WriteString("\n" + errorStyle.Width(m.viewWidth()-2).Render(r.formErr) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("tab pindah · ←/→ ganti cakupan · ctrl+s simpan · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("tab next · ←/→ change scope · ctrl+s save · esc back") + "\n")
 }

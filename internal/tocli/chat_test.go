@@ -36,16 +36,16 @@ func TestClaudeParserStreamsTextOnceAndListsTools(t *testing.T) {
 	events := parseAll(provider(t, "claude").NewParser(),
 		`{"type":"system","subtype":"init","session_id":"s1","parent_tool_use_id":null}`,
 		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"text"}},"parent_tool_use_id":null}`,
-		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hal"}},"parent_tool_use_id":null}`,
-		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"o"}},"parent_tool_use_id":null}`,
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"Halo"}]},"parent_tool_use_id":null}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}},"parent_tool_use_id":null}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}},"parent_tool_use_id":null}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]},"parent_tool_use_id":null}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git  status"}}]},"parent_tool_use_id":null}`,
-		`{"type":"user","message":{"content":"teks biasa"},"parent_tool_use_id":null}`,
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"rahasia"}}]},"parent_tool_use_id":"toolu_1"}`,
-		`bukan json`,
-		`{"type":"result","subtype":"success","session_id":"s2","result":"Halo","permission_denials":[{"tool_name":"Write"}]}`,
+		`{"type":"user","message":{"content":"plain text"},"parent_tool_use_id":null}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"secret"}}]},"parent_tool_use_id":"toolu_1"}`,
+		`not json`,
+		`{"type":"result","subtype":"success","session_id":"s2","result":"Hello","permission_denials":[{"tool_name":"Write"}]}`,
 	)
-	if got := strings.Join(kinds(events, EventText), ""); got != "Halo" {
+	if got := strings.Join(kinds(events, EventText), ""); got != "Hello" {
 		t.Fatalf("text %q", got)
 	}
 	if got := kinds(events, EventTool); len(got) != 1 || got[0] != "Bash: git status" {
@@ -75,32 +75,32 @@ func TestCodexParser(t *testing.T) {
 		`{"type":"thread.started","thread_id":"t1"}`,
 		`{"type":"item.started","item":{"type":"command_execution","command":"ls -la"}}`,
 		`{"type":"item.completed","item":{"type":"file_change","changes":[{"path":"a.go","kind":"update"}]}}`,
-		`{"type":"item.completed","item":{"type":"agent_message","text":"Selesai"}}`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}`,
 		`{"type":"error","message":"Reconnecting... 2/5 (timeout)"}`,
-		`{"type":"turn.failed","error":{"message":"kuota habis"}}`,
+		`{"type":"turn.failed","error":{"message":"quota exhausted"}}`,
 	)
 	if got := kinds(events, EventSession); len(got) != 1 || got[0] != "t1" {
 		t.Fatalf("%q", got)
 	}
-	if got := kinds(events, EventTool); len(got) != 2 || got[0] != "Perintah: ls -la" || got[1] != "File (update): a.go" {
+	if got := kinds(events, EventTool); len(got) != 2 || got[0] != "Command: ls -la" || got[1] != "File (update): a.go" {
 		t.Fatalf("%q", got)
 	}
-	if got := kinds(events, EventText); len(got) != 1 || got[0] != "Selesai" {
+	if got := kinds(events, EventText); len(got) != 1 || got[0] != "Done" {
 		t.Fatalf("%q", got)
 	}
 	if got := kinds(events, EventInfo); len(got) != 1 {
 		t.Fatalf("a retry is not a failure: %+v", events)
 	}
-	if got := kinds(events, EventError); len(got) != 1 || got[0] != "kuota habis" {
+	if got := kinds(events, EventError); len(got) != 1 || got[0] != "quota exhausted" {
 		t.Fatalf("%q", got)
 	}
 }
 
 func TestClaudeParserShowsLocalCommandOnce(t *testing.T) {
 	events := parseAll(WithoutSession(provider(t, "claude").NewParser()),
-		`{"type":"system","subtype":"init","session_id":"sementara","parent_tool_use_id":null}`,
+		`{"type":"system","subtype":"init","session_id":"temporary","parent_tool_use_id":null}`,
 		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Current session: 20% used"}]},"parent_tool_use_id":null}`,
-		`{"type":"result","subtype":"success","session_id":"sementara","result":"Current session: 20% used","local_command":"usage"}`,
+		`{"type":"result","subtype":"success","session_id":"temporary","result":"Current session: 20% used","local_command":"usage"}`,
 	)
 	if got := kinds(events, EventText); len(got) != 1 || got[0] != "Current session: 20% used" {
 		t.Fatalf("%+v", events)
@@ -194,7 +194,7 @@ func TestApprovalServerRelaysDecisions(t *testing.T) {
 
 	// The dialog cannot collect answers, so the model is told to ask in text.
 	question := callApproval(t, session, map[string]any{"tool_name": askQuestionTool, "input": map[string]any{}})
-	if question.Behavior != "deny" || !strings.Contains(question.Message, "teks biasa") {
+	if question.Behavior != "deny" || !strings.Contains(question.Message, "plain text") {
 		t.Fatalf("%+v", question)
 	}
 }
@@ -228,7 +228,7 @@ func TestApprovalServerRequiresToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer server.Close()
-	if _, err := connectApprovals(t, server, "salah"); err == nil {
+	if _, err := connectApprovals(t, server, "wrong"); err == nil {
 		t.Fatal("connected with a wrong token")
 	}
 	if !strings.HasPrefix(server.url, "http://127.0.0.1:") {
@@ -244,15 +244,15 @@ func TestApprovalServerRequiresToken(t *testing.T) {
 func TestHelperCLI(t *testing.T) {
 	switch os.Getenv("TOCLI_HELPER") {
 	case "ok":
-		fmt.Print(`{"type":"item.completed","item":{"type":"agent_message","text":"satu"}}` + "\n")
-		fmt.Print(`{"type":"item.completed","item":{"type":"agent_message","text":"tanpa-baris-akhir"}}`)
+		fmt.Print(`{"type":"item.completed","item":{"type":"agent_message","text":"one"}}` + "\n")
+		fmt.Print(`{"type":"item.completed","item":{"type":"agent_message","text":"no-trailing-newline"}}`)
 		os.Exit(0)
 	case "fail":
-		fmt.Fprint(os.Stderr, "login dulu")
+		fmt.Fprint(os.Stderr, "log in first")
 		os.Exit(3)
 	case "reported":
-		fmt.Print(`{"type":"turn.failed","error":{"message":"kuota habis"}}` + "\n")
-		fmt.Fprint(os.Stderr, "detail lain")
+		fmt.Print(`{"type":"turn.failed","error":{"message":"quota exhausted"}}` + "\n")
+		fmt.Fprint(os.Stderr, "other detail")
 		os.Exit(3)
 	case "hang":
 		fmt.Print(`{"type":"thread.started","thread_id":"t1"}` + "\n")
@@ -280,13 +280,13 @@ func TestRunDeliversEveryLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(events, EventText); len(got) != 2 || got[1] != "tanpa-baris-akhir" {
+	if got := kinds(events, EventText); len(got) != 2 || got[1] != "no-trailing-newline" {
 		t.Fatalf("%+v", events)
 	}
 }
 
 func TestRunExplainsFailure(t *testing.T) {
-	if _, err := runHelper(t, "fail"); err == nil || !strings.Contains(err.Error(), "login dulu") {
+	if _, err := runHelper(t, "fail"); err == nil || !strings.Contains(err.Error(), "log in first") {
 		t.Fatalf("%v", err)
 	}
 	events, err := runHelper(t, "reported")

@@ -13,7 +13,7 @@ import (
 )
 
 // ErrNoImage means the clipboard holds no image.
-var ErrNoImage = errors.New("clipboard tidak berisi gambar")
+var ErrNoImage = errors.New("clipboard does not contain an image")
 
 const (
 	clipboardTimeout = 10 * time.Second
@@ -62,10 +62,10 @@ func validatePNG(data []byte) ([]byte, error) {
 		return nil, ErrNoImage
 	}
 	if !bytes.HasPrefix(data, pngSignature) {
-		return nil, errors.New("isi clipboard bukan gambar PNG")
+		return nil, errors.New("clipboard content is not a PNG image")
 	}
 	if len(data) > maxImageBytes {
-		return nil, fmt.Errorf("gambar lebih besar dari %d MB", maxImageBytes/1024/1024)
+		return nil, fmt.Errorf("image is larger than %d MB", maxImageBytes/1024/1024)
 	}
 	return data, nil
 }
@@ -78,9 +78,9 @@ func runClipboard(ctx context.Context, name string, args ...string) ([]byte, err
 	case errors.As(err, &exit) && exit.ExitCode() == noImageExitCode:
 		return nil, ErrNoImage
 	case errors.Is(err, exec.ErrNotFound):
-		return nil, fmt.Errorf("perintah %s tidak ditemukan", name)
+		return nil, fmt.Errorf("command %s not found", name)
 	case err != nil:
-		return nil, fmt.Errorf("baca clipboard dengan %s: %w", name, err)
+		return nil, fmt.Errorf("read clipboard with %s: %w", name, err)
 	}
 	return out, nil
 }
@@ -88,13 +88,13 @@ func runClipboard(ctx context.Context, name string, args ...string) ([]byte, err
 func readLinuxClipboard(ctx context.Context) ([]byte, error) {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		if _, err := exec.LookPath("wl-paste"); err != nil {
-			return nil, errors.New("butuh wl-paste (paket wl-clipboard) untuk membaca gambar")
+			return nil, errors.New("wl-paste (package wl-clipboard) is required to read images")
 		}
 		out, err := runClipboard(ctx, "wl-paste", "--no-newline", "--type", "image/png")
 		return emptyWhenMissing(out, err)
 	}
 	if _, err := exec.LookPath("xclip"); err != nil {
-		return nil, errors.New("butuh xclip untuk membaca gambar")
+		return nil, errors.New("xclip is required to read images")
 	}
 	out, err := runClipboard(ctx, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 	return emptyWhenMissing(out, err)

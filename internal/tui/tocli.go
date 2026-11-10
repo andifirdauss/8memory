@@ -97,6 +97,9 @@ type tocliState struct {
 	exitArmed   bool
 	slashCursor int
 
+	effort       string // empty means the CLI's own setting
+	effortCursor int
+
 	pending        []*tocli.Approval
 	approvalOffset int
 }
@@ -131,7 +134,7 @@ func (m *Model) currentProvider() tocli.Provider { return tocli.Providers[m.tocl
 
 func (m *Model) openToCLI() (tea.Model, tea.Cmd) {
 	wd, _ := os.Getwd()
-	folder := newInput(wd, "folder proyek")
+	folder := newInput(wd, "project folder")
 	folder.SetWidth(60)
 	m.tocli = tocliState{provider: m.tocli.provider, folder: folder}
 	m.screen = screenToCLIForm
@@ -207,7 +210,7 @@ func (m *Model) prepareToCLI() tea.Cmd {
 			return tocliReadyMsg{err: err}
 		}
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			return tocliReadyMsg{err: fmt.Errorf("folder tidak ditemukan: %s", dir)}
+			return tocliReadyMsg{err: fmt.Errorf("folder not found: %s", dir)}
 		}
 		return tocliReadyMsg{exe: exe, dir: dir, here: gitinfo.ForDir(parent, dir)}
 	}
@@ -220,7 +223,7 @@ func (m *Model) handleToCLIReady(msg tocliReadyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	t.exe, t.dir, t.project, t.branch = msg.exe, msg.dir, msg.here.Project, msg.here.Branch
-	t.status, t.statusErr = "", false
+	t.status, t.statusErr, t.effort = "", false, ""
 	if err := m.openChat(); err != nil {
 		t.formErr = err.Error()
 		return m, nil
@@ -251,6 +254,10 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "enter":
+		if level, ok := effortArgument(t.editor.value()); ok {
+			m.slashEffortLevel(level)
+			return m, nil
+		}
 		return m, m.startPlan()
 	case "pgup":
 		t.scroll += m.bodyHeight()
@@ -276,11 +283,11 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.discardAttachment(t.editor.del())
 	case "ctrl+o":
 		t.asking = true
-		t.pathInput = newInput("", "path file")
+		t.pathInput = newInput("", "file path")
 		t.pathInput.SetWidth(60)
 		t.pathInput.Focus()
 	case "alt+v", "ctrl+v":
-		m.setEditorStatus("Membaca gambar dari clipboard...", false)
+		m.setEditorStatus("Reading image from clipboard...", false)
 		parent := m.ctx
 		return m, func() tea.Msg {
 			data, err := tocli.ReadClipboardImage(parent)
@@ -288,7 +295,7 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+e":
 		if len(t.attachments) == 0 {
-			m.setEditorStatus("Belum ada attachment.", false)
+			m.setEditorStatus("No attachments yet.", false)
 			return m, nil
 		}
 		t.listCursor = min(t.listCursor, len(t.attachments)-1)
@@ -332,12 +339,12 @@ func (m *Model) escapeChat() (tea.Model, tea.Cmd) {
 	t := &m.tocli
 	if t.running {
 		m.stopTurn()
-		m.setEditorStatus("Menghentikan...", false)
+		m.setEditorStatus("Stopping...", false)
 		return m, nil
 	}
 	if len(t.entries) > 0 && !t.exitArmed {
 		t.exitArmed = true
-		m.setEditorStatus("Tekan esc sekali lagi untuk mengakhiri sesi ini.", false)
+		m.setEditorStatus("Press esc again to end this session.", false)
 		return m, nil
 	}
 	m.closeChat()
@@ -428,7 +435,7 @@ func (m *Model) activeInput() *textinput.Model {
 func (m *Model) handleImage(msg tocliImageMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case errors.Is(msg.err, tocli.ErrNoImage):
-		m.setEditorStatus("Clipboard tidak berisi gambar.", true)
+		m.setEditorStatus("Clipboard does not contain an image.", true)
 	case msg.err != nil:
 		m.setEditorStatus(msg.err.Error(), true)
 	default:
@@ -497,7 +504,7 @@ func (m *Model) startPlan() tea.Cmd {
 	typed := t.editor.value()
 	clean := tocli.StripMarkers(typed, t.attachments)
 	if strings.TrimSpace(clean) == "" && len(t.attachments) == 0 {
-		m.setEditorStatus("Prompt masih kosong.", true)
+		m.setEditorStatus("Prompt is empty.", true)
 		return nil
 	}
 	t.sending = true
@@ -575,7 +582,7 @@ func (m *Model) memoryServer() (*tocli.MCPServer, error) {
 // a command that cannot be built leaves no trace in the journey.
 func (m *Model) launch() tea.Cmd {
 	t := &m.tocli
-	plan, project, branch, dir, exe, session := t.plan, t.project, t.branch, t.dir, t.exe, t.session
+	plan, project, branch, dir, exe, session, effort := t.plan, t.project, t.branch, t.dir, t.exe, t.session, t.effort
 	provider, attachments := m.currentProvider(), slices.Clone(t.attachments)
 	attachmentsDir, configDir := m.attachmentsDir(), m.configDir()
 	var approval *tocli.MCPServer
@@ -596,7 +603,7 @@ func (m *Model) launch() tea.Cmd {
 		}
 		request := tocli.Request{
 			Full: plan.briefing.Text, System: plan.briefing.System, Turn: plan.briefing.Turn,
-			Prompt: plan.typed, Attachments: saved, Session: session, Memory: memory, Approval: approval,
+			Prompt: plan.typed, Attachments: saved, Session: session, Effort: effort, Memory: memory, Approval: approval,
 		}
 		if len(saved) > 0 {
 			request.AttachDir, _ = tocli.NodeDir(attachmentsDir, plan.nodeID)
@@ -645,9 +652,9 @@ func (m *Model) handleLaunch(msg tocliLaunchMsg) (tea.Model, tea.Cmd) {
 func (m *Model) viewToCLIForm(b *strings.Builder) {
 	t := &m.tocli
 	b.WriteString("Chat\n\n")
-	providerMark, folderMark, hint := "> ", "  ", "tab pindah · enter pilih provider · esc kembali"
+	providerMark, folderMark, hint := "> ", "  ", "tab next · enter choose provider · esc back"
 	if t.focus == tocliFieldFolder {
-		providerMark, folderMark, hint = "  ", "> ", "tab pindah · enter mulai chat · esc kembali"
+		providerMark, folderMark, hint = "  ", "> ", "tab next · enter start chat · esc back"
 	}
 	fmt.Fprintf(b, "%s%-9s %s ▸\n", providerMark, "Provider", m.currentProvider().Label())
 	fmt.Fprintf(b, "%s%-9s %s\n", folderMark, "Folder", t.folder.View())
@@ -666,7 +673,7 @@ func (m *Model) viewProviderPick(b *strings.Builder) {
 		}
 		b.WriteString(marker + provider.Label() + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter pakai · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select · enter use · esc back") + "\n")
 }
 
 func (m *Model) location() string {
@@ -685,7 +692,7 @@ func (m *Model) viewAttachments(b *strings.Builder) {
 		}
 		b.WriteString(marker + runewidth.Truncate(attachment.Marker, width, "…") + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("↑/↓ pilih · enter pratinjau · d hapus · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select · enter preview · d delete · esc back") + "\n")
 }
 
 func (m *Model) viewScrolled(b *strings.Builder, lines []string, offset int) {
@@ -698,13 +705,13 @@ func (m *Model) viewAttachPreview(b *strings.Builder) {
 	t := &m.tocli
 	b.WriteString(t.previewOf + "\n\n")
 	m.viewScrolled(b, t.previewText, t.offset)
-	b.WriteString("\n" + dimStyle.Render("↑/↓ gulir · esc kembali") + "\n")
+	b.WriteString("\n" + dimStyle.Render("↑/↓ scroll · esc back") + "\n")
 }
 
 func (m *Model) viewCLIPreview(b *strings.Builder) {
 	t := &m.tocli
 	briefing := t.plan.briefing
-	fmt.Fprintf(b, "Pratinjau · %s · %s · %d byte\n\n", m.currentProvider().Label(), m.location(), len(briefing.Text))
+	fmt.Fprintf(b, "Preview · %s · %s · %d bytes\n\n", m.currentProvider().Label(), m.location(), len(briefing.Text))
 	m.viewScrolled(b, t.previewText, t.offset)
 	b.WriteString("\n")
 	width := m.viewWidth() - 2
@@ -712,18 +719,18 @@ func (m *Model) viewCLIPreview(b *strings.Builder) {
 		b.WriteString(errorStyle.Width(width).Render(line) + "\n")
 	}
 	for _, warning := range t.plan.warnings {
-		b.WriteString(errorStyle.Width(width).Render("Peringatan: "+warning) + "\n")
+		b.WriteString(errorStyle.Width(width).Render("Warning: "+warning) + "\n")
 	}
 	if len(t.attachments) > 0 {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("%d attachment dikirim terpisah, tidak dihitung dalam batas ringkasan.", len(t.attachments))) + "\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("%d attachment(s) sent separately, not counted in the briefing limit.", len(t.attachments))) + "\n")
 	}
-	b.WriteString(dimStyle.Render("enter kirim · ↑/↓ gulir · esc kembali") + "\n")
+	b.WriteString(dimStyle.Render("enter send · ↑/↓ scroll · esc back") + "\n")
 }
 
 func (m *Model) cutReport(r compose.Result) []string {
 	var out []string
 	if len(r.DroppedRules) > 0 {
-		out = append(out, fmt.Sprintf("Terpotong: %d aturan tidak muat: %s", len(r.DroppedRules), summarize(r.DroppedRules)))
+		out = append(out, fmt.Sprintf("Truncated, %d rule(s) did not fit: %s", len(r.DroppedRules), summarize(r.DroppedRules)))
 	}
 	return out
 }
@@ -736,7 +743,7 @@ func summarize(names []string) string {
 	}
 	text := strings.Join(short, ", ")
 	if len(names) > shown {
-		text += fmt.Sprintf(", dan %d lainnya", len(names)-shown)
+		text += fmt.Sprintf(", and %d more", len(names)-shown)
 	}
 	return text
 }

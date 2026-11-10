@@ -46,8 +46,8 @@ func TestServeOverStdio(t *testing.T) {
 	}
 
 	// Two separate processes: the memory must outlive the first one.
-	call("memory_write", map[string]any{"change": "add", "feature": "Lintas proses", "content": "Keputusan lintas proses", "project": "demo", "agent": "claude"})
-	if got := call("memory_search", map[string]any{"query": "lintas", "project": "demo"}); !strings.Contains(got, "Keputusan lintas proses") {
+	call("memory_write", map[string]any{"change": "add", "feature": "Cross process", "content": "Cross process decision", "project": "demo", "agent": "claude"})
+	if got := call("memory_search", map[string]any{"query": "cross", "project": "demo"}); !strings.Contains(got, "Cross process decision") {
 		t.Fatal(got)
 	}
 }
@@ -69,10 +69,10 @@ func TestResolvePerMachineAlias(t *testing.T) {
 	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"resolve", "--config", configPath, "backup://proyek/2026-11-09/database.sql"}); err != nil {
+	if err := run([]string{"resolve", "--config", configPath, "backup://project/2026-11-09/database.sql"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"resolve", "--config", configPath, "backup://../rahasia"}); err == nil {
+	if err := run([]string{"resolve", "--config", configPath, "backup://../secret"}); err == nil {
 		t.Fatal("resolved a path outside the alias")
 	}
 	if err := run([]string{"resolve", "--config", configPath}); err == nil {

@@ -26,9 +26,9 @@ const (
 func (k Kind) String() string {
 	switch k {
 	case KindPaste:
-		return "teks tempelan"
+		return "pasted text"
 	case KindImage:
-		return "gambar"
+		return "image"
 	}
 	return "file"
 }
@@ -85,10 +85,14 @@ func NormalizePaste(text string) string {
 // NewPaste wraps pasted text as an attachment.
 func NewPaste(id int, text string) Attachment {
 	lines := CountLines(text)
+	noun := "lines"
+	if lines == 1 {
+		noun = "line"
+	}
 	return Attachment{
 		Kind: KindPaste, ID: id, Lines: lines, Size: int64(len(text)), Data: []byte(text),
 		Name:   fmt.Sprintf("paste-%d.txt", id),
-		Marker: fmt.Sprintf("[Paste #%d · %d baris]", id, lines),
+		Marker: fmt.Sprintf("[Paste #%d · %d %s]", id, lines, noun),
 	}
 }
 
@@ -106,7 +110,7 @@ func NewImage(id int, png []byte) Attachment {
 func NewFile(id int, path string) (Attachment, error) {
 	path = strings.Trim(strings.TrimSpace(path), `"'`)
 	if path == "" {
-		return Attachment{}, errors.New("path wajib diisi")
+		return Attachment{}, errors.New("path is required")
 	}
 	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		home, err := os.UserHomeDir()
@@ -121,13 +125,13 @@ func NewFile(id int, path string) (Attachment, error) {
 	}
 	info, err := os.Stat(absolute)
 	if err != nil {
-		return Attachment{}, fmt.Errorf("file tidak bisa dibaca: %s", absolute)
+		return Attachment{}, fmt.Errorf("cannot read file: %s", absolute)
 	}
 	if info.IsDir() {
-		return Attachment{}, fmt.Errorf("%s adalah folder, bukan file", absolute)
+		return Attachment{}, fmt.Errorf("%s is a folder, not a file", absolute)
 	}
 	if info.Size() > maxFileBytes {
-		return Attachment{}, fmt.Errorf("file lebih besar dari %d MB", maxFileBytes/1024/1024)
+		return Attachment{}, fmt.Errorf("file is larger than %d MB", maxFileBytes/1024/1024)
 	}
 
 	base := filepath.Base(absolute)
@@ -149,16 +153,16 @@ func Preview(a Attachment) string {
 	if a.SourcePath != "" {
 		file, err := os.Open(a.SourcePath)
 		if err != nil {
-			return "File tidak bisa dibaca: " + err.Error()
+			return "Cannot read file: " + err.Error()
 		}
 		defer file.Close()
 		buffer := make([]byte, previewBytes)
 		n, _ := io.ReadFull(file, buffer)
 		data = buffer[:n]
 	}
-	summary := fmt.Sprintf("%s · %d byte", a.Kind, a.Size)
+	summary := fmt.Sprintf("%s · %d bytes", a.Kind, a.Size)
 	if a.Kind == KindImage || !utf8.Valid(trimPartialRune(data)) {
-		return summary + "\n\nIsi tidak bisa ditampilkan sebagai teks."
+		return summary + "\n\nContent cannot be shown as text."
 	}
 	if len(data) > previewBytes {
 		data = data[:previewBytes]
@@ -183,7 +187,7 @@ func trimPartialRune(data []byte) []byte {
 func NodeDir(baseDir, nodeID string) (string, error) {
 	id, err := uuid.Parse(nodeID)
 	if err != nil {
-		return "", fmt.Errorf("node id tidak valid: %q", nodeID)
+		return "", fmt.Errorf("invalid node id: %q", nodeID)
 	}
 	return filepath.Join(baseDir, id.String()), nil
 }
@@ -199,14 +203,14 @@ func Save(baseDir, nodeID string, attachments []Attachment) ([]Attachment, error
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("buat folder attachment: %w", err)
+		return nil, fmt.Errorf("create attachment folder: %w", err)
 	}
 	saved := make([]Attachment, len(attachments))
 	for i, attachment := range attachments {
 		attachment.SavedPath = filepath.Join(dir, attachment.Name)
 		if err := writeAttachment(attachment); err != nil {
 			os.RemoveAll(dir)
-			return nil, fmt.Errorf("simpan %s: %w", attachment.Marker, err)
+			return nil, fmt.Errorf("save %s: %w", attachment.Marker, err)
 		}
 		saved[i] = attachment
 	}

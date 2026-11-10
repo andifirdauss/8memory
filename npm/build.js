@@ -39,8 +39,9 @@ function writePackage(directory, manifest) {
 }
 
 function buildPlatform({ platform, arch, goos, goarch }) {
-  const name = `8memory-${platform}-${arch}`;
-  const directory = path.join(output, name);
+  const folder = `8memory-${platform}-${arch}`;
+  const name = `@mosquen/${folder}`;
+  const directory = path.join(output, folder);
   const executable = platform === "win32" ? "8memory.exe" : "8memory";
   fs.mkdirSync(path.join(directory, "bin"), { recursive: true });
   execFileSync(

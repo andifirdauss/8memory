@@ -10,7 +10,7 @@ const executable = platform === "win32" ? "8memory.exe" : "8memory";
 
 let binary;
 try {
-  binary = require.resolve(`8memory-${platform}-${arch}/bin/${executable}`);
+  binary = require.resolve(`@mosquen/8memory-${platform}-${arch}/bin/${executable}`);
 } catch {
   console.error(
     `8memory: no prebuilt binary found for ${platform}-${arch}.\n` +
